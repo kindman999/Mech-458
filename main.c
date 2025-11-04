@@ -20,6 +20,7 @@
 #include <avr/interrupt.h>
 #include <avr/io.h>
 #include <stdint.h>
+#include "lcd.h"
 
 // Global Variable
 volatile char STATE;
@@ -73,6 +74,9 @@ int main(int argc, char *argv[])
     // configure hardware here
     pwmTimer();
 
+    InitLCD(LS_BLINK | LS_ULINE);
+    LCDClear();
+
     // ADC setup
     adc_init();
 
@@ -101,6 +105,8 @@ int main(int argc, char *argv[])
     sei(); // Note this sets the Global Enable for all interrupts
 
     goto POLLING_STAGE;
+
+    LCDWriteInt(OI_Counter, 1); // testing OI sensor code
 
     // OI Sensor, Changes STATE = 1 -> activates magnetic stage
     if (Entry_Flag == 1)
