@@ -23,6 +23,7 @@
 #include "lcd.h"
 #include "LinkedQueue.h"
 #include <stdlib.h>
+#include <stdio.h>
 
 // Global Variable
 volatile char STATE;
@@ -37,12 +38,12 @@ volatile char STATE;
 #define MOTOR_DIR_DDR DDRL
 #define MOTOR_PIN_IN1 (1 << PL7) // motor input A
 #define MOTOR_PIN_IN2 (1 << PL6) // motor input B
-#define MOTOR_ENA_PORT PORTB
-#define MOTOR_ENA_DDR DDRB
-#define MOTOR_ENA_PIN_A (1 << PB4) // EA
-#define MOTOR_ENA_PIN_B (1 << PB5) // EB
+#define MOTOR_ENA_PORT PORTL
+#define MOTOR_ENA_DDR DDRL
+#define MOTOR_ENA_PIN_A (1 << PL4) // EA
+#define MOTOR_ENA_PIN_B (1 << PL5) // EB
 
-uint8_t motor_direction_cw = 1; // 1 = CW, 0 = CCW
+uint8_t motor_direction_cw = 0; // 1 = CW, 0 = CCW
 // Stepper Motor
 
 // SENSORS-
@@ -65,9 +66,9 @@ volatile uint8_t IND_Flag = 0; // Interrupt flag
 volatile uint8_t OR_Flag = 0; // Interrupt Flag
 
 // ADC definition (Reflective Sensor)
-volatile uint8_t reflective_value = 0;       // reflective sensor reading
-volatile uint8_t ADC_result_flag = 0;        // ADC vect flag, tells us when we are all done the adc conversions
-volatile uint8_t MIN_reflective_value = 255; // minimum reflective sensor reading per object, set to max right now
+volatile uint16_t reflective_value = 0;       // reflective sensor reading
+volatile uint16_t ADC_result_flag = 0;        // ADC vect flag, tells us when we are all done the adc conversions
+volatile uint16_t MIN_reflective_value = 1023; // minimum reflective sensor reading per object, set to max right now
 volatile uint8_t sample_ready = 0;           // tells program 1 sample has finished in reflective sensor
 volatile uint8_t Reflective_Counter = 0;     // counts the number of objects that have reached the reflective sensor
 
@@ -83,7 +84,7 @@ volatile uint8_t Type_2 = 0;
 volatile uint8_t Type_3 = 0;
 volatile uint8_t Type_4 = 0;
 
-#define OR_SENSOR_PIN PD2
+#define OR_SENSOR_PIN PD0
 #define OR_SENSOR_PORT PIND
 
 // Function Definitions
@@ -96,240 +97,250 @@ static inline void motor_apply_direction(void);
 int main(int argc, char *argv[])
 {
 
-    CLKPR = 0x80;
-    CLKPR = 0x01; //  sets system clock to 8MHz
+	CLKPR = 0x80;
+	CLKPR = 0x01; //  sets system clock to 8MHz
 
-    // FIFO Setup
-    link *head, *tail; // pointers to head and tail of link
-    setup(&head, &tail);
-    link *newlink;
-    link *deQueuedLink;
-    STATE = 0;
+// 	// FIFO Setup
+// 	link *head, *tail; // pointers to head and tail of link
+// 	setup(&head, &tail);
+// 	link *newlink;
+// 	link *deQueuedLink;
+// 	STATE = 0;
 
-    cli(); // Disables all interrupts
-    // configure hardware here
-    pwmTimer();
+	cli(); // Disables all interrupts
+	// configure hardware here
+	pwmTimer();
 
-    // LCD Setup
-    InitLCD(LS_BLINK | LS_ULINE);
-    LCDClear();
+	// LCD Setup
+	InitLCD(LS_BLINK|LS_ULINE);
+	LCDClear();
+	
 
-    // ADC setup
-    adc_init();
+	// ADC setup
+	adc_init();
 
-    // start dc
-    motor_init();
+	// start dc
+	motor_init();
 
-    DDRD = 0b11110000; // Going to set up INT2 & INT3 on PORTD
-    DDRC = 0xFF;       // just use as a display
+	DDRD = 0b11110000; // Going to set up INT2 & INT3 on PORTD
+	DDRC = 0xFF;       // just use as a display
 
-    // Set up the Interrupt 0,3 options
-    // External Interrupt Control Register A - EICRA (pg 110 and under the EXT_INT tab to the right
-    // Set Interrupt sense control to catch a rising edge
+	// Set up the Interrupt 0,3 options
+	// External Interrupt Control Register A - EICRA (pg 110 and under the EXT_INT tab to the right
+	// Set Interrupt sense control to catch a rising edge
 
-    EICRA |= _BV(ISC01) | _BV(ISC00); // INT0 PD0 OI Interrupt
-    EICRA |= _BV(ISC11);
-    EICRA &= ~_BV(ISC10);             // INT1 PD1 IND Interrupt, falling edge
-    EICRA |= _BV(ISC21) | _BV(ISC20); // INT2 PD2, OR Interrupt entry
-    EICRA |= _BV(ISC31);
-    EICRA &= ~_BV(ISC30); // INT3 PD3, falling edge OR exit
+	EICRA |= _BV(ISC01) | _BV(ISC00); // INT0 PD0 OI Interrupt
+	EICRA |= _BV(ISC11);
+	EICRA &= ~_BV(ISC10);             // INT1 PD1 IND Interrupt, falling edge
+	EICRA |= _BV(ISC21) | _BV(ISC20); // INT2 PD2, OR Interrupt entry
+	EICRA |= _BV(ISC31) |_BV(ISC30); // INT3 PD3, rising edge
 
-    //	EICRA &= ~_BV(ISC21) & ~_BV(ISC20); /* These lines would undo the above two lines */
-    //	EICRA &= ~_BV(ISC31) & ~_BV(ISC30); /* Nice little trick */
+	//	EICRA &= ~_BV(ISC21) & ~_BV(ISC20); /* These lines would undo the above two lines */
+	//	EICRA &= ~_BV(ISC31) & ~_BV(ISC30); /* Nice little trick */
 
-    // See page 112 - EIFR External Interrupt Flags...notice how they reset on their own in 'C'...not in assembly
+	// See page 112 - EIFR External Interrupt Flags...notice how they reset on their own in 'C'...not in assembly
 
-    EIMSK |= (_BV(INT0) | _BV(INT1) | _BV(INT2) | _BV(INT3)); // Enables INT0,INT1,INT2,INT3
+	EIMSK |= (_BV(INT0) | _BV(INT1) | _BV(INT2) | _BV(INT3)); // Enables INT0,INT1,INT2,INT3
 
-    // Enable all interrupts
-    sei(); // Note this sets the Global Enable for all interrupts
+	// Enable all interrupts
+	sei(); // Note this sets the Global Enable for all interrupts
 
-    goto POLLING_STAGE;
+	goto POLLING_STAGE;
 
-    LCDWriteInt(OI_Counter, 1); // testing OI sensor code
+	
 
-    // OI Sensor, Changes STATE = 1 -> activates magnetic stage
-    if (Entry_Flag == 1)
-    {                   // INTO activated, OI_Counter++
-        Entry_Flag = 0; // reset entry flag
-    }
+	// POLLING STATE
+	POLLING_STAGE:
+	//PORTC |= 0xF0; // Indicates this state is active
+	//LCDWriteInt(OI_Counter, 1); // testing OI sensor code
 
-// POLLING STATE
-POLLING_STAGE:
-    PORTC |= 0xF0; // Indicates this state is active
-    switch (STATE)
-    {
-    case (0):
-        goto POLLING_STAGE;
-        break; // not needed but syntax is correct
-    case (1):
-        goto MAGNETIC_STAGE;
-        break;
-    case (2):
-        goto REFLECTIVE_STAGE;
-        break;
-    case (3):
-        goto BUCKET_STAGE;
-        break;
-    case (5):
-        goto END;
-    default:
-        goto POLLING_STAGE;
-    } // switch STATE
+	// OI Sensor, Changes STATE = 1 -> activates magnetic stage
+	if (Entry_Flag == 1)
+	{                   // INTO activated, OI_Counter++
+		Entry_Flag = 0; // reset entry flag
+	}
+	switch (STATE)
+	{
+		case (0):
+		goto POLLING_STAGE;
+		break; // not needed but syntax is correct
+		case (1):
+		goto MAGNETIC_STAGE;
+		break;
+		case (2):
+		goto REFLECTIVE_STAGE;
+		break;
+		case (3):
+		goto BUCKET_STAGE;
+		break;
+		case (5):
+		goto END;
+		default:
+		goto POLLING_STAGE;
+	} // switch STATE
 
-MAGNETIC_STAGE:
-    // OI detected, reading IND (Ferromagnetic sensor)
+	MAGNETIC_STAGE:
+	// OI detected, reading IND (Ferromagnetic sensor)
 
-    PORTC = 0x01; // Just output pretty lights know you made it here
+	//PORTC = 0x01; // Just output pretty lights know you made it here
 
-    if (IND_Flag == 1)
-    {
-        IND_Flag = 0; // resets interrupt flag
-        // now add object to FIFO
-        initLink(&newlink); // makes memory for the link
-        newlink->e.Obj_num = OI_Counter;
-        newlink->e.Ferromagetic = IND_Type;
-        newlink->e.Reflective = 0; // point to 0 for now
-        newlink->e.OBJ_Type = 0;
-        enqueue(&head, &tail, &newlink);
+// 	if (IND_Flag == 1)
+// 	{
+// 		IND_Flag = 0; // resets interrupt flag
+// 		// now add object to FIFO
+// 		initLink(&newlink); // makes memory for the link
+// 		newlink->e.Obj_num = OI_Counter;
+// 		newlink->e.Ferromagetic = IND_Type;
+// 		newlink->e.Reflective = 0; // point to 0 for now
+// 		newlink->e.OBJ_Type = 0;
+// 		enqueue(&head, &tail, &newlink);
+// 
+// 		IND_Type = 0; // reset for next;
+// 	}
 
-        IND_Type = 0; // reset for next;
-    }
+	// Reset the state variable
+	STATE = 0;
+	goto POLLING_STAGE;
 
-    // Reset the state variable
-    STATE = 0;
-    goto POLLING_STAGE;
+	REFLECTIVE_STAGE:
 
-REFLECTIVE_STAGE:
-    // Do whatever is necessary HERE
-    while ((ADC_result_flag == 0))
-    { // sits until ADC result flag reads 1 (conversions finished)
+	// Do whatever is necessary HERE
+	//PORTC = 0b00001111; //check lights
+	
+	while ((ADC_result_flag == 0))
+	{ // sits until ADC result flag reads 1 (conversions finished)
+	}
+		LCDClear();
+	LCDWriteInt(MIN_reflective_value,4);
+	
+	MIN_reflective_value = 1023;
 
-        if (sample_ready == 1)
-        {
-            LCDWriteInt(reflective_value, 3); // to see what reflective value is
-            sample_ready = 0;
-        }
-    }
+	ADC_result_flag = 0; // Resets ADC result flag once it finished converting all adc
 
-    ADC_result_flag = 0; // Resets ADC result flag once it finished converting all adc
+	//LCDWriteInt(MIN_reflective_value,3); //display the objects total reflective value
 
-    // LCDWriteInt(MIN_reflective_value,3); //display the objects total reflective value
+	// categorize material type here
+	// Just placeholder numbers for now
+// 			initLink(&newlink); // makes memory for the link
+// 				newlink->e.Obj_num = OI_Counter;
+// 				newlink->e.Ferromagetic = IND_Type;
+// 		 		newlink->e.Reflective = 0; // point to 0 for now
+// 				newlink->e.OBJ_Type = 0;
+// 	     		initLink(&newlink); // makes memory for the link
+// 	     		
+// 	if (MIN_reflective_value < 150)
+// 	{
+// 		// means object is reflective
+// 
+// 		if (head->e.Ferromagetic == 1)
+// 		{ // check if current was ferromagnetic
+// 			// object is reflective and ferromagnetic
+// 			OBJ_Type = 3;
+// 		}
+// 		else
+// 		{
+// 			// object is reflective but not ferromagnetic
+// 			OBJ_Type = 2;
+// 		}
+// 	}
+// 	else
+// 	{
+// 		// means object is not reflective
+// 		if (head->e.Ferromagetic == 1)
+// 		{ // check if current was ferromagnetic
+// 			// object is not reflective and ferromagnetic
+// 			OBJ_Type = 1;
+// 		}
+// 		else
+// 		{
+// 			// object is not reflective but not ferromagnetic
+// 			OBJ_Type = 4;
+// 		}
+// 	}
 
-    // categorize material type here
-    // Just placeholder numbers for now
-    if (MIN_reflective_value < 150)
-    {
-        // means object is reflective
+// 	if (!isEmpty(&head))
+// 	{ // edit objects reflection value and type
+// 		head->e.Reflective = MIN_reflective_value;
+// 		head->e.OBJ_Type = OBJ_Type;
+/*	}*/
+	// LCDWriteInt(OBJ_Type,1); //display the object type
 
-        if (head->e.Ferromagetic == 1)
-        { // check if current was ferromagnetic
-            // object is reflective and ferromagnetic
-            OBJ_Type = 3;
-        }
-        else
-        {
-            // object is reflective but not ferromagnetic
-            OBJ_Type = 2;
-        }
-    }
-    else
-    {
-        // means object is not reflective
-        if (head->e.Ferromagetic == 1)
-        { // check if current was ferromagnetic
-            // object is not reflective and ferromagnetic
-            OBJ_Type = 1;
-        }
-        else
-        {
-            // object is not reflective but not ferromagnetic
-            OBJ_Type = 4;
-        }
-    }
+	// add info to array
+// 	OBJ_Types[OI_Counter - 1] = head->e.OBJ_Type;
+// 	OBJ_Type = 0;                  // reset obj typ
+// 	dequeue(&head, &deQueuedLink); // dequeue head
+// 	free(deQueuedLink);            // free space
 
-    if (!isEmpty(&head))
-    { // edit objects reflection value and type
-        head->e.Reflective = MIN_reflective_value;
-        head->e.OBJ_Type = OBJ_Type;
-    }
-    // LCDWriteInt(OBJ_Type,1); //display the object type
+	// SORTING FUNCTION CALLED HERE
 
-    // add info to array
-    OBJ_Types[OI_Counter - 1] = head->e.OBJ_Type;
-    OBJ_Type = 0;                  // reset obj typ
-    dequeue(&head, &deQueuedLink); // dequeue head
-    free(deQueuedLink);            // free space
+	 // Just output pretty lights know you made it here
+	// Reset the state variable
+	STATE = 0;
+	goto POLLING_STAGE;
 
-    // SORTING FUNCTION CALLED HERE
+	BUCKET_STAGE:
+	// Do whatever is necessary HERE
+	//PORTC = 0x08;
+	// Reset the state variable
+	STATE = 0;
+	goto POLLING_STAGE;
 
-    PORTC = 0x04; // Just output pretty lights know you made it here
-    // Reset the state variable
-    STATE = 0;
-    goto POLLING_STAGE;
+	END:
+	// The closing STATE ... how would you get here?
+	//PORTC = 0b11000000; // Indicates this state is active
+	// Stop everything here...'MAKE SAFE'
+	//LCDWriteString("END");
+	if (END_Flag == 1)
+	{
+		END_Flag = 0;
+	}
 
-BUCKET_STAGE:
-    // Do whatever is necessary HERE
-    PORTC = 0x08;
-    // Reset the state variable
-    STATE = 0;
-    goto POLLING_STAGE;
+	OCR0A = 0; // stops dc motor
 
-END:
-    // The closing STATE ... how would you get here?
-    PORTC = 0xF0; // Indicates this state is active
-    // Stop everything here...'MAKE SAFE'
-    if (END_Flag == 1)
-    {
-        END_Flag = 0;
-    }
+// 	for (int i = 0; i < OI_Counter; i++)
+// 	{
+// 		int FINAL_OBJ = OBJ_Types[i];
+// 		switch (FINAL_OBJ)
+// 		{
+// 			case 0: // None / glitch
+// 			Type_1++;
+// 			break;
+// 			case 1: // Reflective
+// 			Type_2++;
+// 			break;
+// 			case 2: // Ferromagnetic + Reflective
+// 			Type_3++;
+// 			break;
+// 			case 3: // Non-ferro, non-reflective
+// 			Type_4++;
+// 			break;
+// 			default:
+// 			// optional error handling
+// 			break;
+// 		}
+// 	}
 
-    OCR0A = 0; // stops dc motor
+// 	LCDClear();
+// 	LCDWriteString("Type 1: ");
+// 	LCDWriteInt(Type_1, 2);
+// 	mTimer(1000); // wait 1 second
+// 
+// 	LCDClear();
+// 	LCDWriteString("Type 2: ");
+// 	LCDWriteInt(Type_2, 2);
+// 	mTimer(1000); // wait 1 second
+// 
+// 	LCDClear();
+// 	LCDWriteString("Type 3: ");
+// 	LCDWriteInt(Type_3, 2);
+// 	mTimer(1000); // wait 1 second
+// 
+// 	LCDClear();
+// 	LCDWriteString("Type 4: ");
+// 	LCDWriteInt(Type_4, 2);
+// 	mTimer(1000); // wait 1 second
 
-    for (int i = 0; i < OI_Counter; i++)
-    {
-        int FINAL_OBJ = OBJ_Types[i];
-        switch (FINAL_OBJ)
-        {
-        case 0: // None / glitch
-            Type_1++;
-            break;
-        case 1: // Reflective
-            Type_2++;
-            break;
-        case 2: // Ferromagnetic + Reflective
-            Type_3++;
-            break;
-        case 3: // Non-ferro, non-reflective
-            Type_4++;
-            break;
-        default:
-            // optional error handling
-            break;
-        }
-    }
-
-    LCDClear();
-    LCDWriteString("Type 1: ");
-    LCDWriteInt(Type_1, 2);
-    mTimer(1000); // wait 1 second
-
-    LCDClear();
-    LCDWriteString("Type 2: ");
-    LCDWriteInt(Type_2, 2);
-    mTimer(1000); // wait 1 second
-
-    LCDClear();
-    LCDWriteString("Type 3: ");
-    LCDWriteInt(Type_3, 2);
-    mTimer(1000); // wait 1 second
-
-    LCDClear();
-    LCDWriteString("Type 4: ");
-    LCDWriteInt(Type_4, 2);
-    mTimer(1000); // wait 1 second
-
-    return (0);
+	return (0);
 }
 
 // ISR's
@@ -337,63 +348,68 @@ END:
 // INT0 OI Sensor
 ISR(INT0_vect)
 {
-    mTimer(5);      // debounce
-    OI_Counter++;   //+1 Cylinder Count
-    Entry_Flag = 1; // Activates Entry Flag for main loop
-    STATE = 1;
+	
+	Entry_Flag = 1;
+	reflective_value = 0;     // resets reflective value
+	MIN_reflective_value = 1023; // resets minimum reflective value
+	// Starts ADC Conversion, moves to ADC Interrupt
+	OI_Counter++;   //+1 Cylinder Count
+	 // Activates Entry Flag for main loop
+	STATE = 2;
+	ADCSRA |= _BV(ADSC);
+	 
 }
 
 // INT1 IND Sensor
 ISR(INT1_vect)
 {
-    mTimer(5);    // debounce
-    IND_Type = 1; // if enters here, cylinder musty be metallic
-    IND_Flag = 1; // Activates interrupt flag for main
+// 	mTimer(5);    // debounce
+// 	IND_Type = 1; // if enters here, cylinder musty be metallic
+// 	IND_Flag = 1; // Activates interrupt flag for main
 }
 /* Set up the External Interrupt 2 Vector */
 ISR(INT2_vect)
 {
-    /* Toggle PORTC bit 2 */
-    // OR_Flag = 1; //Enables Flag
-    mTimer(5); // debounce
-    STATE = 2;
-    reflective_value = 255;     // resets reflective value
-    MIN_reflective_value = 255; // resets minimum reflective value
-
-    ADCSRA |= _BV(ADSC); // Starts ADC Conversion, moves to ADC Interrupt
+	/* Toggle PORTC bit 2 */
+// 	// OR_Flag = 1; //Enables Flag
+// 	mTimer(5); // debounce
+// 	STATE = 2;
+// 	reflective_value = 255;     // resets reflective value
+// 	MIN_reflective_value = 255; // resets minimum reflective value
+// 
+// 	ADCSRA |= _BV(ADSC); // Starts ADC Conversion, moves to ADC Interrupt
 }
 
 ISR(INT3_vect)
 {
-    /* Toggle PORTC bit 3 */
-    // end state temporary
-    mTimer(5); // debounce
-    END_Flag = 1;
-    STATE = 5;
+	/* Toggle PORTC bit 3 */
+	// end state temporary
+	//mTimer(5); // debounce
+	//PORTC = 0b10000000;
+	END_Flag = 1;
+	STATE = 5;
 }
 
 ISR(ADC_vect)
 {
-    // adc conversion code here
-    //  Do whatever you need with it (store, process, etc.)
+	// adc conversion code here
+	//  Do whatever you need with it (store, process, etc.)
+			reflective_value = ADC; 
+			
+			if (reflective_value < MIN_reflective_value)
+			{                                            // checks if it is new minimum
+				MIN_reflective_value = reflective_value; // sets it as new minimum
+			}
+			
+	if (OR_SENSOR_PORT & (1 << OR_SENSOR_PIN))
+	{
+		ADCSRA |= _BV(ADSC); // start the next conversion immediately
+	}
+	else
+	{
 
-    if (OR_SENSOR_PORT & (1 << OR_SENSOR_PIN))
-    {
-        reflective_value = ADCH; // read the
-
-        if (reflective_value < MIN_reflective_value)
-        {                                            // checks if it is new minimum
-            MIN_reflective_value = reflective_value; // sets it as new minimum
-        }
-
-        sample_ready = 1;
-        ADCSRA |= _BV(ADSC); // start the next conversion immediately
-    }
-    else
-    {
-
-        ADC_result_flag = 1; // ADC ended go back to main
-    }
+		ADC_result_flag = 1; // ADC ended go back to main
+	}
 }
 
 // If an unexpected interrupt occurs (interrupt is enabled and no handler is installed,
@@ -403,54 +419,54 @@ ISR(ADC_vect)
 // The latter must be used inside assembly code in case <avr/interrupt.h> is not included.
 ISR(BADISR_vect)
 {
-    // user code here
+	// user code here
 }
 
 // mTimer
 void mTimer(int count)
 {
-    int i = 0;
-    TCCR1B |= _BV(WGM12);
-    OCR1A = 0x03E8; // 1 ms
-    TCNT1 = 0x0000;
-    // TIMSK1 |= 0b00000010;
-    TIFR1 |= _BV(OCF1A);
+	int i = 0;
+	TCCR1B |= _BV(WGM12);
+	OCR1A = 0x03E8; // 1 ms
+	TCNT1 = 0x0000;
+	// TIMSK1 |= 0b00000010;
+	TIFR1 |= _BV(OCF1A);
 
-    while (i < count)
-    {
-        if ((TIFR1 & 0x02) == 0x02)
-        {
-            TIFR1 |= _BV(OCF1A);
-            i++;
-        }
-    }
-    return;
+	while (i < count)
+	{
+		if ((TIFR1 & 0x02) == 0x02)
+		{
+			TIFR1 |= _BV(OCF1A);
+			i++;
+		}
+	}
+	return;
 }
 
 // PWM
 void pwmTimer()
 {
 
-    // Set Timer0 to Fast PWM mode (WGM00 + WGM01 = 1)
+	// Set Timer0 to Fast PWM mode (WGM00 + WGM01 = 1)
 
-    TCCR0A |= (1 << WGM00) | (1 << WGM01);
-    TCCR0B |= (0 << WGM02); // WGM02 = 0 (part of Fast PWM setup)
+	TCCR0A |= (1 << WGM00) | (1 << WGM01);
+	TCCR0B |= (0 << WGM02); // WGM02 = 0 (part of Fast PWM setup)
 
-    // Enable compare match interrupt
+	// Enable compare match interrupt
 
-    // TIMSK0 |= (1 << OCIE0A);
+	// TIMSK0 |= (1 << OCIE0A);
 
-    // Set non-inverting mode on OC0A (clear on compare, set at bottom)
+	// Set non-inverting mode on OC0A (clear on compare, set at bottom)
 
-    TCCR0A |= (1 << COM0A1) | (0 << COM0A0);
+	TCCR0A |= (1 << COM0A1) | (0 << COM0A0);
 
-    // Set prescaler
+	// Set prescaler
 
-    TCCR0B |= (1 << CS01) | (1 << CS00);
+	TCCR0B |= (1 << CS01) | (1 << CS00);
 
-    OCR0A = 128; // Set duty cycle
+	OCR0A = 30; // Set duty cycle
 
-    DDRB |= (1 << PB7); // Set PB7 (OC0A) as output for PWM
+	DDRB |= (1 << PB7); // Set PB7 (OC0A) as output for PWM
 }
 
 // ADC
@@ -458,42 +474,42 @@ void pwmTimer()
 // initilaize adc with general channel
 void adc_init(void)
 {
-    // Vref = AVcc, left adjust result, channel ADC0
-    ADMUX = _BV(REFS0) | _BV(ADLAR); // REFS0=1 (AVcc), ADLAR=1
-    ADMUX &= 0xF0;                   // MUX[3:0]=0000 (ADC0)
+	// Vref = AVcc, right adjust result, channel ADC0
+	ADMUX = _BV(REFS0); 
+	//ADMUX &= 0xF0;                   // MUX[3:0]=0000 (ADC0)
 
-    // Free-running disabled; we'll retrigger in ISR (simple & robust)
-    ADCSRA = _BV(ADEN) | _BV(ADIE); // enable ADC + interrupt
-    ADCSRB = 0x00;
+	// Free-running disabled; we'll retrigger in ISR 
+	ADCSRA = _BV(ADEN) | _BV(ADIE); // enable ADC + interrupt
+	ADCSRB = 0x00;
 
-    // Prescaler /64 -> 8 MHz / 64 = 125 kHz ADC clock
-    ADCSRA |= _BV(ADPS2) | _BV(ADPS1); // 110 = ÷64
+	// Prescaler /32
+	ADCSRA |= _BV(ADPS2) | _BV(ADPS0);
 }
 
 void motor_init(void)
 {
-    // Direction pins
-    MOTOR_DIR_DDR |= MOTOR_PIN_IN1 | MOTOR_PIN_IN2;
+	// Direction pins
+	MOTOR_DIR_DDR |= MOTOR_PIN_IN1 | MOTOR_PIN_IN2;
 
-    // Enable pins
-    MOTOR_ENA_DDR |= MOTOR_ENA_PIN_A | MOTOR_ENA_PIN_B;
+	// Enable pins
+	MOTOR_ENA_DDR |= MOTOR_ENA_PIN_A | MOTOR_ENA_PIN_B;
 
-    // Enable EA/EB
-    MOTOR_ENA_PORT |= MOTOR_ENA_PIN_A | MOTOR_ENA_PIN_B;
+	// Enable EA/EB
+	MOTOR_ENA_PORT |= MOTOR_ENA_PIN_A | MOTOR_ENA_PIN_B;
 
-    // Default direction CW: IN1=1, IN2=0
-    motor_apply_direction();
+	// Default direction CW: IN1=1, IN2=0
+	motor_apply_direction();
 }
 static inline void motor_apply_direction(void)
 {
-    if (motor_direction_cw)
-    {
-        MOTOR_DIR_PORT |= MOTOR_PIN_IN1;
-        MOTOR_DIR_PORT &= ~MOTOR_PIN_IN2;
-    }
-    else
-    {
-        MOTOR_DIR_PORT &= ~MOTOR_PIN_IN1;
-        MOTOR_DIR_PORT |= MOTOR_PIN_IN2;
-    }
+	if (motor_direction_cw)
+	{
+		MOTOR_DIR_PORT |= MOTOR_PIN_IN1;
+		MOTOR_DIR_PORT &= ~MOTOR_PIN_IN2;
+	}
+	else
+	{
+		MOTOR_DIR_PORT &= ~MOTOR_PIN_IN1;
+		MOTOR_DIR_PORT |= MOTOR_PIN_IN2;
+	}
 }
