@@ -73,9 +73,12 @@ volatile uint8_t sample_ready = 0;           // tells program 1 sample has finis
 volatile uint8_t Reflective_Counter = 0;     // counts the number of objects that have reached the reflective sensor
 
 volatile uint8_t OBJ_Type = 0;
-// 1- Ferromagnetic | 2 - Reflective | 3 - Ferromagnetic and Reflective | 4 - None
 volatile uint8_t OBJ_Types[48]; // store object types
+
 // Optical Sensor EX
+
+volatile uint8_t EX_Flag = 0;
+element Test; //Print head 
 
 // END STATE BUTTON
 volatile uint8_t END_Flag = 1;
@@ -99,13 +102,14 @@ int main(int argc, char *argv[])
 
 	CLKPR = 0x80;
 	CLKPR = 0x01; //  sets system clock to 8MHz
+	TCCR1B |= _BV(CS11);
 
 // 	// FIFO Setup
-// 	link *head, *tail; // pointers to head and tail of link
-// 	setup(&head, &tail);
-// 	link *newlink;
-// 	link *deQueuedLink;
-// 	STATE = 0;
+	link *head, *tail; // pointers to head and tail of link
+	setup(&head, &tail);
+	link *newlink;
+	link *deQueuedLink;
+	STATE = 0;
 
 	cli(); // Disables all interrupts
 	// configure hardware here
@@ -114,7 +118,7 @@ int main(int argc, char *argv[])
 	// LCD Setup
 	InitLCD(LS_BLINK|LS_ULINE);
 	LCDClear();
-	
+	LCDWriteString("START");
 
 	// ADC setup
 	adc_init();
@@ -129,10 +133,9 @@ int main(int argc, char *argv[])
 	// External Interrupt Control Register A - EICRA (pg 110 and under the EXT_INT tab to the right
 	// Set Interrupt sense control to catch a rising edge
 
-	EICRA |= _BV(ISC01) | _BV(ISC00); // INT0 PD0 OI Interrupt
-	EICRA |= _BV(ISC11);
-	EICRA &= ~_BV(ISC10);             // INT1 PD1 IND Interrupt, falling edge
-	EICRA |= _BV(ISC21) | _BV(ISC20); // INT2 PD2, OR Interrupt entry
+	EICRA |= _BV(ISC01) | _BV(ISC00); // INT0 PD0 OR Interrupt
+	EICRA |= _BV(ISC11) |_BV(ISC10);  // INT1 EX sensor, Rising edge
+	EICRA |= _BV(ISC21) | _BV(ISC20); // INT2 PD2, 
 	EICRA |= _BV(ISC31) |_BV(ISC30); // INT3 PD3, rising edge
 
 	//	EICRA &= ~_BV(ISC21) & ~_BV(ISC20); /* These lines would undo the above two lines */
@@ -173,97 +176,59 @@ int main(int argc, char *argv[])
 		case (3):
 		goto BUCKET_STAGE;
 		break;
-		case (5):
+		case (4):
 		goto END;
 		default:
 		goto POLLING_STAGE;
 	} // switch STATE
 
 	MAGNETIC_STAGE:
-	// OI detected, reading IND (Ferromagnetic sensor)
 
-	//PORTC = 0x01; // Just output pretty lights know you made it here
-
-// 	if (IND_Flag == 1)
-// 	{
-// 		IND_Flag = 0; // resets interrupt flag
-// 		// now add object to FIFO
-// 		initLink(&newlink); // makes memory for the link
-// 		newlink->e.Obj_num = OI_Counter;
-// 		newlink->e.Ferromagetic = IND_Type;
-// 		newlink->e.Reflective = 0; // point to 0 for now
-// 		newlink->e.OBJ_Type = 0;
-// 		enqueue(&head, &tail, &newlink);
-// 
-// 		IND_Type = 0; // reset for next;
-// 	}
-
-	// Reset the state variable
 	STATE = 0;
 	goto POLLING_STAGE;
 
 	REFLECTIVE_STAGE:
 
 	// Do whatever is necessary HERE
-	//PORTC = 0b00001111; //check lights
+	
 	
 	while ((ADC_result_flag == 0))
 	{ // sits until ADC result flag reads 1 (conversions finished)
 	}
-		LCDClear();
-	LCDWriteInt(MIN_reflective_value,4);
 	
-	MIN_reflective_value = 1023;
-
-	ADC_result_flag = 0; // Resets ADC result flag once it finished converting all adc
-
+// 		LCDClear();
+// 	 	LCDWriteInt(MIN_reflective_value,4);
+		/* LCDWriteString("Reflective Zone");*/
+if (MIN_reflective_value >= 0 && MIN_reflective_value < 250) {
+	// aluminum (0 <= MIN_reflective_value < 250)
+	OBJ_Type = 1;
+	} else if (MIN_reflective_value >= 250 && MIN_reflective_value < 600) {
+	// steel (250 <= MIN_reflective_value < 560)
+	OBJ_Type = 2;
+	} else if (MIN_reflective_value >= 600 && MIN_reflective_value < 970) {
+	// white plastic (560 <= MIN_reflective_value < 970)
+	OBJ_Type = 3;
+	} else if (MIN_reflective_value >= 970 && MIN_reflective_value <= 1023) {
+	// black plastic (970 <= MIN_reflective_value <= 1023)
+	OBJ_Type = 4;
+	} else {
+	// Optional: Handle values outside the expected 0-1023 range
+	// OBJ_Type = 0;
+}
+	
 	//LCDWriteInt(MIN_reflective_value,3); //display the objects total reflective value
-
+LCDClear();
+LCDWriteInt(MIN_reflective_value,4);
 	// categorize material type here
-	// Just placeholder numbers for now
-// 			initLink(&newlink); // makes memory for the link
-// 				newlink->e.Obj_num = OI_Counter;
-// 				newlink->e.Ferromagetic = IND_Type;
-// 		 		newlink->e.Reflective = 0; // point to 0 for now
-// 				newlink->e.OBJ_Type = 0;
-// 	     		initLink(&newlink); // makes memory for the link
-// 	     		
-// 	if (MIN_reflective_value < 150)
-// 	{
-// 		// means object is reflective
-// 
-// 		if (head->e.Ferromagetic == 1)
-// 		{ // check if current was ferromagnetic
-// 			// object is reflective and ferromagnetic
-// 			OBJ_Type = 3;
-// 		}
-// 		else
-// 		{
-// 			// object is reflective but not ferromagnetic
-// 			OBJ_Type = 2;
-// 		}
-// 	}
-// 	else
-// 	{
-// 		// means object is not reflective
-// 		if (head->e.Ferromagetic == 1)
-// 		{ // check if current was ferromagnetic
-// 			// object is not reflective and ferromagnetic
-// 			OBJ_Type = 1;
-// 		}
-// 		else
-// 		{
-// 			// object is not reflective but not ferromagnetic
-// 			OBJ_Type = 4;
-// 		}
-// 	}
+	
+			initLink(&newlink); // makes memory for the link
+				newlink->e.Obj_num = OI_Counter;
+		 		newlink->e.Reflective = MIN_reflective_value; 
+				newlink->e.OBJ_Type = OBJ_Type;
+	     		enqueue(&head,&tail,&newlink); // makes memory for the link
+// 				 
+ADC_result_flag = 0; // Resets ADC result flag once it finished converting all adc
 
-// 	if (!isEmpty(&head))
-// 	{ // edit objects reflection value and type
-// 		head->e.Reflective = MIN_reflective_value;
-// 		head->e.OBJ_Type = OBJ_Type;
-/*	}*/
-	// LCDWriteInt(OBJ_Type,1); //display the object type
 
 	// add info to array
 // 	OBJ_Types[OI_Counter - 1] = head->e.OBJ_Type;
@@ -272,16 +237,46 @@ int main(int argc, char *argv[])
 // 	free(deQueuedLink);            // free space
 
 	// SORTING FUNCTION CALLED HERE
+	
+	
 
 	 // Just output pretty lights know you made it here
 	// Reset the state variable
 	STATE = 0;
 	goto POLLING_STAGE;
+	
+	
+	
 
 	BUCKET_STAGE:
 	// Do whatever is necessary HERE
-	//PORTC = 0x08;
-	// Reset the state variable
+	
+	//Object has reached ex sensor
+	if(EX_Flag == 1){
+		EX_Flag = 0;
+	}
+//Print Object characteristics
+
+	Test = firstValue(&head);
+	int Current_OBJ_Type = Test.OBJ_Type;
+	int Current_OBJ_Num = Test.Obj_num;
+	uint16_t Current_Reflective = Test.Reflective;
+	
+OBJ_Types[Current_OBJ_Num-1] = Current_OBJ_Type;
+
+	LCDClear();
+	LCDWriteString("Type:");
+	LCDWriteInt(Current_OBJ_Type,1);
+	LCDWriteString(" #:");
+	LCDWriteInt(Current_OBJ_Num,2);
+	LCDGotoXY(0, 1);
+	LCDWriteString("RF:");
+	LCDWriteInt(Current_Reflective,4);
+	
+//dequeue 
+dequeue(&head,&tail,&deQueuedLink);
+free(deQueuedLink);
+	
 	STATE = 0;
 	goto POLLING_STAGE;
 
@@ -290,55 +285,52 @@ int main(int argc, char *argv[])
 	//PORTC = 0b11000000; // Indicates this state is active
 	// Stop everything here...'MAKE SAFE'
 	//LCDWriteString("END");
-	if (END_Flag == 1)
+
+
+
+
+	for (int i = 0; i < OI_Counter; i++)
 	{
-		END_Flag = 0;
+		int FINAL_OBJ = OBJ_Types[i];
+		switch (FINAL_OBJ)
+		{
+			case 1: // aluminum
+			Type_1++;
+			break;
+			case 2: // Steel
+			Type_2++;
+			break;
+			case 3: // White
+			Type_3++;
+			break;
+			case 4: // Black
+			Type_4++;
+			break;
+			default:
+			// optional error handling
+			break;
+		}
 	}
 
-	OCR0A = 0; // stops dc motor
+	LCDClear();
+	LCDWriteString("Aluminum: ");
+	LCDWriteInt(Type_1, 2);
+	mTimer(2000); // wait 1 second
 
-// 	for (int i = 0; i < OI_Counter; i++)
-// 	{
-// 		int FINAL_OBJ = OBJ_Types[i];
-// 		switch (FINAL_OBJ)
-// 		{
-// 			case 0: // None / glitch
-// 			Type_1++;
-// 			break;
-// 			case 1: // Reflective
-// 			Type_2++;
-// 			break;
-// 			case 2: // Ferromagnetic + Reflective
-// 			Type_3++;
-// 			break;
-// 			case 3: // Non-ferro, non-reflective
-// 			Type_4++;
-// 			break;
-// 			default:
-// 			// optional error handling
-// 			break;
-// 		}
-// 	}
+	LCDClear();
+	LCDWriteString("Steel: ");
+	LCDWriteInt(Type_2, 2);
+	mTimer(2000); // wait 1 second
 
-// 	LCDClear();
-// 	LCDWriteString("Type 1: ");
-// 	LCDWriteInt(Type_1, 2);
-// 	mTimer(1000); // wait 1 second
-// 
-// 	LCDClear();
-// 	LCDWriteString("Type 2: ");
-// 	LCDWriteInt(Type_2, 2);
-// 	mTimer(1000); // wait 1 second
-// 
-// 	LCDClear();
-// 	LCDWriteString("Type 3: ");
-// 	LCDWriteInt(Type_3, 2);
-// 	mTimer(1000); // wait 1 second
-// 
-// 	LCDClear();
-// 	LCDWriteString("Type 4: ");
-// 	LCDWriteInt(Type_4, 2);
-// 	mTimer(1000); // wait 1 second
+	LCDClear();
+	LCDWriteString("White: ");
+	LCDWriteInt(Type_3, 2);
+	mTimer(2000); // wait 1 second
+
+	LCDClear();
+	LCDWriteString("Black: ");
+	LCDWriteInt(Type_4, 2);
+	mTimer(2000); // wait 1 second
 
 	return (0);
 }
@@ -357,15 +349,14 @@ ISR(INT0_vect)
 	 // Activates Entry Flag for main loop
 	STATE = 2;
 	ADCSRA |= _BV(ADSC);
-	 
+	
 }
 
-// INT1 IND Sensor
+// INT1 EX Sensor
 ISR(INT1_vect)
 {
-// 	mTimer(5);    // debounce
-// 	IND_Type = 1; // if enters here, cylinder musty be metallic
-// 	IND_Flag = 1; // Activates interrupt flag for main
+EX_Flag = 1;
+STATE = 3; //Bucket Stage
 }
 /* Set up the External Interrupt 2 Vector */
 ISR(INT2_vect)
@@ -386,8 +377,8 @@ ISR(INT3_vect)
 	// end state temporary
 	//mTimer(5); // debounce
 	//PORTC = 0b10000000;
-	END_Flag = 1;
-	STATE = 5;
+	OCR0A = 0; // stops dc motor
+	STATE = 4;
 }
 
 ISR(ADC_vect)
@@ -464,7 +455,7 @@ void pwmTimer()
 
 	TCCR0B |= (1 << CS01) | (1 << CS00);
 
-	OCR0A = 30; // Set duty cycle
+	OCR0A = 64; // Set duty cycle
 
 	DDRB |= (1 << PB7); // Set PB7 (OC0A) as output for PWM
 }
