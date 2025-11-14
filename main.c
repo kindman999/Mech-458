@@ -45,6 +45,17 @@ volatile char STATE;
 
 uint8_t motor_direction_cw = 0; // 1 = CW, 0 = CCW
 // Stepper Motor
+int current_step = 0;
+int direction = 0;
+//1 - CW, 0 - CCW
+volatile uint8_t stepper_position = 4;
+//0 - aluminum, 2 - steel, 3 - white, 4- black
+volatile uint8_t stepper_flag = 0;
+//meaning on object must now be sorted if 1
+volatile uint8_t sorted_flag = 1;
+volatile int step_count = 0;
+element Sort_Element;
+volatile int sort_status = 0;
 
 // SENSORS-
 
@@ -80,6 +91,9 @@ volatile uint8_t OBJ_Types[48]; // store object types
 volatile uint8_t EX_Flag = 0;
 element Test; //Print head 
 
+//HE Sensor
+volatile uint8_t HE_Flag = 0;
+
 // END STATE BUTTON
 volatile uint8_t END_Flag = 1;
 volatile uint8_t Type_1 = 0; // counters
@@ -95,7 +109,12 @@ void adc_init(void);
 void pwmTimer(void);
 void mTimer(int);
 void motor_init(void);
+void step(int);
+void step_zero(void);
+void sort(int);
+
 static inline void motor_apply_direction(void);
+
 
 int main(int argc, char *argv[])
 {
@@ -118,14 +137,19 @@ int main(int argc, char *argv[])
 	// LCD Setup
 	InitLCD(LS_BLINK|LS_ULINE);
 	LCDClear();
-	LCDWriteString("START");
+		
 
 	// ADC setup
 	adc_init();
 
 	// start dc
 	motor_init();
-
+	
+	//zero step
+	DDRA = 0xFF;
+	PORTA = 0x00;
+	
+	
 	DDRD = 0b11110000; // Going to set up INT2 & INT3 on PORTD
 	DDRC = 0xFF;       // just use as a display
 
@@ -135,8 +159,9 @@ int main(int argc, char *argv[])
 
 	EICRA |= _BV(ISC01) | _BV(ISC00); // INT0 PD0 OR Interrupt
 	EICRA |= _BV(ISC11) |_BV(ISC10);  // INT1 EX sensor, Rising edge
-	EICRA |= _BV(ISC21) | _BV(ISC20); // INT2 PD2, 
-	EICRA |= _BV(ISC31) |_BV(ISC30); // INT3 PD3, rising edge
+	EICRA &= ~(_BV(ISC21) | _BV(ISC20));
+	EICRA |= _BV(ISC21); // INT2 PD2, HE Sensor, falling edge
+	EICRA |= _BV(ISC31) |_BV(ISC30); // INT3 PD3, rising edge, Pause button
 
 	//	EICRA &= ~_BV(ISC21) & ~_BV(ISC20); /* These lines would undo the above two lines */
 	//	EICRA &= ~_BV(ISC31) & ~_BV(ISC30); /* Nice little trick */
@@ -147,6 +172,8 @@ int main(int argc, char *argv[])
 
 	// Enable all interrupts
 	sei(); // Note this sets the Global Enable for all interrupts
+  // step_zero();
+  step_zero();
 
 	goto POLLING_STAGE;
 
@@ -162,6 +189,16 @@ int main(int argc, char *argv[])
 	{                   // INTO activated, OI_Counter++
 		Entry_Flag = 0; // reset entry flag
 	}
+	
+	//sorting function
+ 	if(stepper_flag == 1 && sorted_flag == 1){
+
+ 		LCDWriteInt(head->e.OBJ_Type, 1);
+	    sort(head->e.OBJ_Type);
+		sorted_flag = 0; //resets sorted flag
+		stepper_flag = 0; //resets stepper flag
+ 	}
+	
 	switch (STATE)
 	{
 		case (0):
@@ -218,7 +255,10 @@ if (MIN_reflective_value >= 0 && MIN_reflective_value < 250) {
 	
 	//LCDWriteInt(MIN_reflective_value,3); //display the objects total reflective value
 LCDClear();
-LCDWriteInt(MIN_reflective_value,4);
+/*LCDWriteInt(MIN_reflective_value,4);*/
+// 	LCDWriteInt(stepper_flag, 1);
+// 	LCDWriteInt(sorted_flag,1);
+
 	// categorize material type here
 	
 			initLink(&newlink); // makes memory for the link
@@ -227,6 +267,10 @@ LCDWriteInt(MIN_reflective_value,4);
 				newlink->e.OBJ_Type = OBJ_Type;
 	     		enqueue(&head,&tail,&newlink); // makes memory for the link
 // 				 
+
+
+
+stepper_flag = 1;
 ADC_result_flag = 0; // Resets ADC result flag once it finished converting all adc
 
 
@@ -255,15 +299,16 @@ ADC_result_flag = 0; // Resets ADC result flag once it finished converting all a
 	if(EX_Flag == 1){
 		EX_Flag = 0;
 	}
-//Print Object characteristics
-
-	Test = firstValue(&head);
-	int Current_OBJ_Type = Test.OBJ_Type;
-	int Current_OBJ_Num = Test.Obj_num;
-	uint16_t Current_Reflective = Test.Reflective;
 	
-OBJ_Types[Current_OBJ_Num-1] = Current_OBJ_Type;
+	
+//Print Object characteristics
+Test = firstValue(&head); //sets values for LCD output later
+int Current_OBJ_Type = Test.OBJ_Type;
+int Current_OBJ_Num = Test.Obj_num;
+uint16_t Current_Reflective = Test.Reflective;
 
+OBJ_Types[Current_OBJ_Num-1] = Current_OBJ_Type; //array to track object types
+	
 	LCDClear();
 	LCDWriteString("Type:");
 	LCDWriteInt(Current_OBJ_Type,1);
@@ -277,6 +322,8 @@ OBJ_Types[Current_OBJ_Num-1] = Current_OBJ_Type;
 dequeue(&head,&tail,&deQueuedLink);
 free(deQueuedLink);
 	
+	sorted_flag = 1;
+	sort_status = 0;
 	STATE = 0;
 	goto POLLING_STAGE;
 
@@ -342,6 +389,7 @@ ISR(INT0_vect)
 {
 	
 	Entry_Flag = 1;
+	
 	reflective_value = 0;     // resets reflective value
 	MIN_reflective_value = 1023; // resets minimum reflective value
 	// Starts ADC Conversion, moves to ADC Interrupt
@@ -361,14 +409,8 @@ STATE = 3; //Bucket Stage
 /* Set up the External Interrupt 2 Vector */
 ISR(INT2_vect)
 {
-	/* Toggle PORTC bit 2 */
-// 	// OR_Flag = 1; //Enables Flag
-// 	mTimer(5); // debounce
-// 	STATE = 2;
-// 	reflective_value = 255;     // resets reflective value
-// 	MIN_reflective_value = 255; // resets minimum reflective value
-// 
-// 	ADCSRA |= _BV(ADSC); // Starts ADC Conversion, moves to ADC Interrupt
+	//HE Sensor
+	HE_Flag = 1;
 }
 
 ISR(INT3_vect)
@@ -455,7 +497,7 @@ void pwmTimer()
 
 	TCCR0B |= (1 << CS01) | (1 << CS00);
 
-	OCR0A = 64; // Set duty cycle
+	OCR0A = 40; // Set duty cycle
 
 	DDRB |= (1 << PB7); // Set PB7 (OC0A) as output for PWM
 }
@@ -504,3 +546,179 @@ static inline void motor_apply_direction(void)
 		MOTOR_DIR_PORT |= MOTOR_PIN_IN2;
 	}
 }
+
+
+
+
+
+
+// Step motor one step
+void step(int direction) {
+	if (direction == 1) {            // CW
+		current_step++;
+		if (current_step > 4) current_step = 1;
+		} else {                         // CCW
+		current_step--;
+		if (current_step < 1) current_step = 4;
+	}
+
+	switch (current_step) {
+		case (1): PORTA = 0b00010111; break;
+		case (2): PORTA = 0b00011011; break;
+		case (3): PORTA = 0b00101011; break;
+		case (4): PORTA = 0b00100111; break;
+	}
+
+	mTimer(20);  // short delay
+}
+
+void step_zero(void){
+	HE_Flag = 0;  // clear before starting
+stepper_position = 4;
+	while(1){
+		step(direction);
+
+		if(HE_Flag == 1){
+			mTimer(20);   // settle
+			HE_Flag = 0;
+			break;
+		}
+	}
+}
+
+void sort(int OBJ_Type){
+	
+	LCDClear();
+	LCDWriteInt(stepper_position,1);
+	LCDWriteInt(OBJ_Type,1);
+	//aluminum
+	if(OBJ_Type == 1){
+	
+		switch(stepper_position){
+			
+			case(1): //already sorted
+			stepper_position = 1;	
+			break;
+			
+			case(2): //steel 
+			direction = 1;
+			step_count = 100;
+			stepper_position = 1;	
+			break;
+			
+			case(3): // white
+			direction = 0;
+			step_count = 50;
+			stepper_position = 1;	
+			break;
+			
+			case(4): // black 
+			direction = 1;
+			step_count = 50;
+			stepper_position = 1;	
+			break;
+		}
+
+	
+		
+	}else{
+		if(OBJ_Type == 2){ //steel
+			
+		switch(stepper_position){
+				
+			case(1): //aluminum
+			direction = 0;
+			step_count = 100;
+			stepper_position = 2;
+			break;
+		
+			case(2): //steel //already sorted
+			stepper_position = 2;
+			break;
+		
+			case(3): // white
+			direction = 1;
+			step_count = 50;
+			stepper_position = 2;
+			break;
+		
+			case(4): // black
+				direction = 0;
+			step_count = 50;
+			stepper_position = 2;
+			break;
+			}
+			
+			
+		}else{
+			
+			if(OBJ_Type == 3){ //white
+				switch(stepper_position){
+					
+					case(1): //aluminum
+					direction = 1;
+					step_count = 50;
+					stepper_position = 3;
+					break;
+					
+					case(2): //steel
+					direction = 0;
+					step_count = 50;
+				stepper_position = 3;
+					break;
+					
+					case(3): // white
+					stepper_position = 3;
+					break;
+					
+					case(4): // black
+					direction = 1;
+					step_count = 100;
+				stepper_position = 3;
+					break;
+				}
+		
+				
+			}else{
+				
+				if(OBJ_Type == 4){ //black
+						switch(stepper_position){
+							
+							case(1): //aluminum
+							direction = 0;
+							step_count = 50;
+									stepper_position = 4;	
+							break;
+							
+							case(2): //steel
+							direction = 1;
+							step_count = 50;
+								stepper_position = 4;	
+							break;
+							
+							case(3): // white
+							direction = 0;
+							step_count = 100;
+									stepper_position = 4;	
+							break;
+							
+							case(4): // black
+									stepper_position = 4;	
+							break;
+						}
+				
+	}
+				
+			}
+			
+			
+			
+		}
+
+	
+}
+	for (int i = 0; i < step_count; i++) step(direction);
+	
+
+
+		}
