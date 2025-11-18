@@ -653,6 +653,7 @@ void sort(int OBJ_Type){
 	LCDClear();
 	LCDWriteInt(stepper_position,1);
 	LCDWriteInt(OBJ_Type,1);
+		step_count = 0;
 	//aluminum
 	if(OBJ_Type == 1){
 
@@ -669,13 +670,13 @@ void sort(int OBJ_Type){
 			break;
 
 			case(3): // white
-			direction = 0;
+			direction = 1;
 			step_count = 50;
 			stepper_position = 1;	
 			break;
 
 			case(4): // black 
-			direction = 1;
+			direction = 0;
 			step_count = 50;
 			stepper_position = 1;	
 			break;
@@ -699,13 +700,13 @@ void sort(int OBJ_Type){
 				break;
 
 				case(3): // white
-				direction = 1;
+				direction = 0;
 				step_count = 50;
 				stepper_position = 2;
 				break;
 
 				case(4): // black
-				direction = 0;
+				direction = 1;
 				step_count = 50;
 				stepper_position = 2;
 				break;
@@ -718,13 +719,13 @@ void sort(int OBJ_Type){
 				switch(stepper_position){
 
 					case(1): //aluminum
-					direction = 1;
+					direction = 0;
 					step_count = 50;
 					stepper_position = 3;
 					break;
 
 					case(2): //steel
-					direction = 0;
+					direction = 1;
 					step_count = 50;
 					stepper_position = 3;
 					break;
@@ -747,13 +748,13 @@ void sort(int OBJ_Type){
 					switch(stepper_position){
 
 						case(1): //aluminum
-						direction = 0;
+						direction = 1;
 						step_count = 50;
 						stepper_position = 4;	
 						break;
 
 						case(2): //steel
-						direction = 1;
+						direction = 0;
 						step_count = 50;
 						stepper_position = 4;	
 						break;
@@ -793,5 +794,8 @@ void sort(int OBJ_Type){
 
 	// Ensure S-curve is disabled after move
 	stepper_scurve_active = 0;
+
+}
+
 
 }
