@@ -491,7 +491,6 @@ void motor_init(void)
 	MOTOR_ENA_PORT |= MOTOR_ENA_PIN_A | MOTOR_ENA_PIN_B;
 
 	// Default direction CW: IN1=1, IN2=0
-	motor_direction_cw = 0;
 	motor_apply_direction();
 }
 
