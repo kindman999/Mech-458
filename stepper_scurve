@@ -208,6 +208,17 @@ POLLING_STAGE:
 		sorted_flag = 0; //resets sorted flag
 		stepper_flag = 0; //resets stepper flag
  	}
+	if (STATE !=4){
+		if(EX_Flag == 1){
+			STATE = 3; //Bucket stage
+		}
+		else if(ADC_result_flag == 1){
+			STATE = 2;
+		}
+		else{
+			STATE = 0;
+		}
+}
 
 	switch (STATE)
 	{
@@ -369,7 +380,6 @@ ISR(INT0_vect)
 	MIN_reflective_value = 1023; // resets minimum reflective value
 	// Starts ADC Conversion, moves to ADC Interrupt
 	OI_Counter++;   //+1 Cylinder Count
-	STATE = 2;
 	ADCSRA |= _BV(ADSC);
 }
 
@@ -377,7 +387,6 @@ ISR(INT0_vect)
 ISR(INT1_vect)
 {
 	EX_Flag = 1;
-	STATE = 3; //Bucket Stage
 }
 
 /* Set up the External Interrupt 2 Vector */
