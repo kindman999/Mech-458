@@ -152,7 +152,7 @@ int main(int argc, char *argv[])
 	motor_init();
 
 	// Smooth S-curve acceleration from 0 -> 40 duty over 1000 ms using 50 steps
-	motor_scurve_accel(0, 40, 1000, 50);
+	motor_scurve_accel(0, 80, 400, 40);
 
 	//zero step
 	DDRA = 0xFF;
@@ -613,7 +613,7 @@ void step(int direction) {
 		float s = t * t * (3.0f - 2.0f * t);
 
 		// Delay in ms: start longer, shorten in middle, lengthen again
-		const float max_delay_ms = 7.0f; // near start/stop
+		const float max_delay_ms = 12.0f; // near start/stop
 		const float min_delay_ms = 3.0f;  // peak speed (faster than original 20 ms)
 
 		float delay_ms = max_delay_ms - (max_delay_ms - min_delay_ms) * s;
