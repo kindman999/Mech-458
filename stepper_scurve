@@ -613,8 +613,8 @@ void step(int direction) {
 		float s = t * t * (3.0f - 2.0f * t);
 
 		// Delay in ms: start longer, shorten in middle, lengthen again
-		const float max_delay_ms = 20.0f; // near start/stop
-		const float min_delay_ms = 5.0f;  // peak speed (faster than original 20 ms)
+		const float max_delay_ms = 7.0f; // near start/stop
+		const float min_delay_ms = 3.0f;  // peak speed (faster than original 20 ms)
 
 		float delay_ms = max_delay_ms - (max_delay_ms - min_delay_ms) * s;
 		if (delay_ms < min_delay_ms) delay_ms = min_delay_ms;
@@ -629,7 +629,7 @@ void step(int direction) {
 		}
 	} else {
 		// Default fixed delay if S-curve not active
-		mTimer(20);
+		mTimer(10);
 	}
 }
 
