@@ -1,0 +1,808 @@
+// READ EVERY SINGLE WORD IN THIS PIECE OF CODE...IF YOU DON'T YOU WILL NOT UNDERSTAND THIS!!!!!!!
+// READ EVERY SINGLE WORD IN THIS PIECE OF CODE...IF YOU DON'T YOU WILL NOT UNDERSTAND THIS!!!!!!!
+// READ EVERY SINGLE WORD IN THIS PIECE OF CODE...IF YOU DON'T YOU WILL NOT UNDERSTAND THIS!!!!!!!
+// READ EVERY SINGLE WORD IN THIS PIECE OF CODE...IF YOU DON'T YOU WILL NOT UNDERSTAND THIS!!!!!!!
+// READ EVERY SINGLE WORD IN THIS PIECE OF CODE...IF YOU DON'T YOU WILL NOT UNDERSTAND THIS!!!!!!!
+
+// Open up the document in START -> WinAVR -> AVR LibC -> User Manual -> avr/interrupt.h
+// Chapter 15, in Full Manual... THIS HAS A LOT OF IMPORTANT INFO...I have mentioned this at least 3 times!!!
+
+// For those that are still having major problems, I've seen about 1/3 of the class with major problems in
+// code structure. If you are still having major problems with your code, it's time to do a VERY quick overhaul.
+// I've provided a skeleton structure with an example using two input capture interrupts on PORTDA0 and A3
+// Please try this in the debugger.
+
+// Create a watch variable on STATE. To do this right click on the variable STATE and then
+// Add Watch 'STATE'. You can see how the variable changes as you click on PINDA0 or PINDA3. Note that the interrupt
+// catches a rising edge. You modify this to suit your needs.
+
+#include <avr/interrupt.h>
+#include <avr/io.h>
+#include <stdint.h>
+#include "lcd.h"
+#include "LinkedQueue.h"
+#include <stdlib.h>
+#include <stdio.h>
+
+// Global Variable
+volatile char STATE;
+
+// DEFINITIONS*
+
+// ADC setup
+
+// MOTORS-
+// DC Motor
+#define MOTOR_DIR_PORT PORTL
+#define MOTOR_DIR_DDR DDRL
+#define MOTOR_PIN_IN1 (1 << PL7) // motor input A
+#define MOTOR_PIN_IN2 (1 << PL6) // motor input B
+#define MOTOR_ENA_PORT PORTL
+#define MOTOR_ENA_DDR DDRL
+#define MOTOR_ENA_PIN_A (1 << PL4) // EA
+#define MOTOR_ENA_PIN_B (1 << PL5) // EB
+
+uint8_t motor_direction_cw = 0; // 1 = CW, 0 = CCW
+// Stepper Motor
+int current_step = 0;
+int direction = 0;
+//1 - CW, 0 - CCW
+volatile uint8_t stepper_position = 4;
+//0 - aluminum, 2 - steel, 3 - white, 4- black
+volatile uint8_t stepper_flag = 0;
+//meaning on object must now be sorted if 1
+volatile uint8_t sorted_flag = 1;
+volatile int step_count = 0;
+element Sort_Element;
+volatile int sort_status = 0;
+
+// Stepper S-curve control
+volatile uint8_t stepper_scurve_active = 0;
+volatile uint16_t stepper_total_steps = 0;
+volatile uint16_t stepper_step_index = 0;
+
+// SENSORS-
+
+// Optical Sensor OI
+// Purpose: detect if object has reached ferromagnetic sensor and keep track of Cylinders at entrance
+volatile uint8_t OI_Counter = 0; // Counts # of parts detected with IO sensor
+
+volatile uint8_t Entry_Flag = 0; // Interrupt Flag
+
+// Ferromagnetic Sensor IND
+// Purpose: Determines if object is metallic or not, activated from OI Sensor
+// Sensor is active low, meaning falling edge interrupt
+
+volatile uint8_t IND_Type = 0; // if = 0 - non metallic if = 1 - metallic
+volatile uint8_t IND_Flag = 0; // Interrupt flag
+
+// Optical Sensor OR
+// Purpose: Detect if object is in reflective sensor
+volatile uint8_t OR_Flag = 0; // Interrupt Flag
+
+// ADC definition (Reflective Sensor)
+volatile uint16_t reflective_value = 0;        // reflective sensor reading
+volatile uint16_t ADC_result_flag = 0;         // ADC vect flag, tells us when we are all done the adc conversions
+volatile uint16_t MIN_reflective_value = 1023; // minimum reflective sensor reading per object, set to max right now
+volatile uint8_t sample_ready = 0;             // tells program 1 sample has finished in reflective sensor
+volatile uint8_t Reflective_Counter = 0;       // counts the number of objects that have reached the reflective sensor
+
+volatile uint8_t OBJ_Type = 0;
+volatile uint8_t OBJ_Types[48]; // store object types
+
+// Optical Sensor EX
+
+volatile uint8_t EX_Flag = 0;
+element Test; //Print head
+
+//HE Sensor
+volatile uint8_t HE_Flag = 0;
+
+// END STATE BUTTON
+volatile uint8_t END_Flag = 1;
+volatile uint8_t Type_1 = 0; // counters
+volatile uint8_t Type_2 = 0;
+volatile uint8_t Type_3 = 0;
+volatile uint8_t Type_4 = 0;
+volatile uint8_t stop_request_flag = 0;
+
+#define OR_SENSOR_PIN PD0
+#define OR_SENSOR_PORT PIND
+
+// Function Definitions
+void adc_init(void);
+void pwmTimer(void);
+void mTimer(int);
+void motor_init(void);
+void step(int);
+void step_zero(void);
+void sort(int);
+void motor_set_speed(uint8_t duty);
+void motor_scurve_accel(uint8_t start_duty, uint8_t target_duty, uint16_t duration_ms, uint8_t steps);
+void motor_scurve_decel(uint8_t start_duty, uint8_t target_duty, uint16_t duration_ms, uint8_t steps);
+
+static inline void motor_apply_direction(void);
+
+int main(int argc, char *argv[])
+{
+
+	CLKPR = 0x80;
+	CLKPR = 0x01; //  sets system clock to 8MHz
+	TCCR1B |= _BV(CS11);
+
+	// FIFO Setup
+	link *head, *tail; // pointers to head and tail of link
+	setup(&head, &tail);
+	link *newlink;
+	link *deQueuedLink;
+	STATE = 0;
+
+	cli(); // Disables all interrupts
+	// configure hardware here
+	pwmTimer();
+
+	// LCD Setup
+	InitLCD(LS_BLINK|LS_ULINE);
+	LCDClear();
+
+	// ADC setup
+	adc_init();
+
+	// start dc
+	motor_init();
+
+	// Smooth S-curve acceleration from 0 -> 40 duty over 1000 ms using 50 steps
+	motor_scurve_accel(0, 80, 400, 40);
+
+	//zero step
+	DDRA = 0xFF;
+	PORTA = 0x00;
+
+	DDRD = 0b11110000; // Going to set up INT2 & INT3 on PORTD
+	DDRC = 0xFF;       // just use as a display
+
+	// Set up the Interrupt 0,3 options
+	// External Interrupt Control Register A - EICRA (pg 110 and under the EXT_INT tab to the right
+	// Set Interrupt sense control to catch a rising edge
+
+	EICRA |= _BV(ISC01) | _BV(ISC00); // INT0 PD0 OR Interrupt
+	EICRA |= _BV(ISC11) |_BV(ISC10);  // INT1 EX sensor, Rising edge
+	EICRA &= ~(_BV(ISC21) | _BV(ISC20));
+	EICRA |= _BV(ISC21); // INT2 PD2, HE Sensor, falling edge
+	EICRA |= _BV(ISC31) |_BV(ISC30); // INT3 PD3, rising edge, Pause button
+
+	// See page 112 - EIFR External Interrupt Flags...notice how they reset on their own in 'C'...not in assembly
+
+	EIMSK |= (_BV(INT0) | _BV(INT1) | _BV(INT2) | _BV(INT3)); // Enables INT0,INT1,INT2,INT3
+
+	// Enable all interrupts
+	sei(); // Note this sets the Global Enable for all interrupts
+
+	step_zero();
+
+	goto POLLING_STAGE;
+
+	// POLLING STATE
+	POLLING_STAGE:
+	// Handle stop request with smooth S-curve deceleration
+	if (stop_request_flag)
+	{
+		uint8_t current_duty = OCR0A;
+		// Decelerate conveyor smoothly to 0 over 1000 ms using 50 steps
+		motor_scurve_decel(current_duty, 0, 1000, 50);
+		stop_request_flag = 0;
+		STATE = 4; // go to END state after decel
+	}
+
+	// OI Sensor, Changes STATE = 1 -> activates magnetic stage
+	if (Entry_Flag == 1)
+	{                   // INTO activated, OI_Counter++
+		Entry_Flag = 0; // reset entry flag
+	}
+
+	//sorting function
+	if(stepper_flag == 1 && sorted_flag == 1){
+
+		LCDWriteInt(head->e.OBJ_Type, 1);
+		sort(head->e.OBJ_Type);
+		sorted_flag = 0; //resets sorted flag
+		stepper_flag = 0; //resets stepper flag
+	}
+	if (STATE !=4){
+		if(EX_Flag == 1){
+			STATE = 3; //Bucket stage
+		}
+		else if(ADC_result_flag == 1){
+			STATE = 2;
+		}
+		else{
+			STATE = 0;
+		}
+	}
+
+	switch (STATE)
+	{
+		case (0):
+		goto POLLING_STAGE;
+		break; // not needed but syntax is correct
+		case (1):
+		goto MAGNETIC_STAGE;
+		break;
+		case (2):
+		goto REFLECTIVE_STAGE;
+		break;
+		case (3):
+		goto BUCKET_STAGE;
+		break;
+		case (4):
+		goto END;
+		default:
+		goto POLLING_STAGE;
+	} // switch STATE
+
+	MAGNETIC_STAGE:
+
+	STATE = 0;
+	goto POLLING_STAGE;
+
+	REFLECTIVE_STAGE:
+
+	// Do whatever is necessary HERE
+
+	while ((ADC_result_flag == 0))
+	{ // sits until ADC result flag reads 1 (conversions finished)
+	}
+
+	if (MIN_reflective_value >= 0 && MIN_reflective_value < 250) {
+		// aluminum (0 <= MIN_reflective_value < 250)
+		OBJ_Type = 1;
+		} else if (MIN_reflective_value >= 250 && MIN_reflective_value < 600) {
+		// steel (250 <= MIN_reflective_value < 560)
+		OBJ_Type = 2;
+		} else if (MIN_reflective_value >= 600 && MIN_reflective_value < 970) {
+		// white plastic (560 <= MIN_reflective_value < 970)
+		OBJ_Type = 3;
+		} else if (MIN_reflective_value >= 970 && MIN_reflective_value <= 1023) {
+		// black plastic (970 <= MIN_reflective_value <= 1023)
+		OBJ_Type = 4;
+		} else {
+		// Optional: Handle values outside the expected 0-1023 range
+		// OBJ_Type = 0;
+	}
+
+	LCDClear();
+
+	// categorize material type here
+
+	initLink(&newlink); // makes memory for the link
+	newlink->e.Obj_num = OI_Counter;
+	newlink->e.Reflective = MIN_reflective_value;
+	newlink->e.OBJ_Type = OBJ_Type;
+	enqueue(&head,&tail,&newlink); // makes memory for the link
+
+	stepper_flag = 1;
+	ADC_result_flag = 0; // Resets ADC result flag once it finished converting all adc
+
+	STATE = 0;
+	goto POLLING_STAGE;
+
+	BUCKET_STAGE:
+	// Do whatever is necessary HERE
+
+	//Object has reached ex sensor
+	if(EX_Flag == 1){
+		EX_Flag = 0;
+	}
+
+	//Print Object characteristics
+	Test = firstValue(&head); //sets values for LCD output later
+	int Current_OBJ_Type = Test.OBJ_Type;
+	int Current_OBJ_Num = Test.Obj_num;
+	uint16_t Current_Reflective = Test.Reflective;
+
+	OBJ_Types[Current_OBJ_Num-1] = Current_OBJ_Type; //array to track object types
+
+	LCDClear();
+	LCDWriteString("Type:");
+	LCDWriteInt(Current_OBJ_Type,1);
+	LCDWriteString(" #:");
+	LCDWriteInt(Current_OBJ_Num,2);
+	LCDGotoXY(0, 1);
+	LCDWriteString("RF:");
+	LCDWriteInt(Current_Reflective,4);
+
+	//dequeue
+	dequeue(&head,&tail,&deQueuedLink);
+	free(deQueuedLink);
+
+	sorted_flag = 1;
+	sort_status = 0;
+	STATE = 0;
+	goto POLLING_STAGE;
+
+	END:
+	// The closing STATE ... how would you get here?
+
+	for (int i = 0; i < OI_Counter; i++)
+	{
+		int FINAL_OBJ = OBJ_Types[i];
+		switch (FINAL_OBJ)
+		{
+			case 1: // aluminum
+			Type_1++;
+			break;
+			case 2: // Steel
+			Type_2++;
+			break;
+			case 3: // White
+			Type_3++;
+			break;
+			case 4: // Black
+			Type_4++;
+			break;
+			default:
+			// optional error handling
+			break;
+		}
+	}
+
+	LCDClear();
+	LCDWriteString("Aluminum: ");
+	LCDWriteInt(Type_1, 2);
+	mTimer(2000); // wait 2 seconds
+
+	LCDClear();
+	LCDWriteString("Steel: ");
+	LCDWriteInt(Type_2, 2);
+	mTimer(2000); // wait 2 seconds
+
+	LCDClear();
+	LCDWriteString("White: ");
+	LCDWriteInt(Type_3, 2);
+	mTimer(2000); // wait 2 seconds
+
+	LCDClear();
+	LCDWriteString("Black: ");
+	LCDWriteInt(Type_4, 2);
+	mTimer(2000); // wait 2 seconds
+
+	return (0);
+}
+
+// ISR's
+
+// INT0 OI Sensor
+ISR(INT0_vect)
+{
+	Entry_Flag = 1;
+
+	reflective_value = 0;     // resets reflective value
+	MIN_reflective_value = 1023; // resets minimum reflective value
+	// Starts ADC Conversion, moves to ADC Interrupt
+	OI_Counter++;   //+1 Cylinder Count
+	ADCSRA |= _BV(ADSC);
+}
+
+// INT1 EX Sensor
+ISR(INT1_vect)
+{
+	EX_Flag = 1;
+}
+
+/* Set up the External Interrupt 2 Vector */
+ISR(INT2_vect)
+{
+	//HE Sensor
+	HE_Flag = 1;
+}
+
+ISR(INT3_vect)
+{
+	// Request smooth stop; handled in main polling loop
+	stop_request_flag = 1;
+}
+
+ISR(ADC_vect)
+{
+	// adc conversion code here
+	reflective_value = ADC;
+
+	if (reflective_value < MIN_reflective_value)
+	{                                            // checks if it is new minimum
+		MIN_reflective_value = reflective_value; // sets it as new minimum
+	}
+
+	if (OR_SENSOR_PORT & (1 << OR_SENSOR_PIN))
+	{
+		ADCSRA |= _BV(ADSC); // start the next conversion immediately
+	}
+	else
+	{
+
+		ADC_result_flag = 1; // ADC ended go back to main
+	}
+}
+
+// If an unexpected interrupt occurs (interrupt is enabled and no handler is installed,
+// which usually indicates a bug), then the default action is to reset the device by jumping
+// to the reset vector. You can override this by supplying a function named BADISR_vect which
+// should be defined with ISR() as such. (The name BADISR_vect is actually an alias for __vector_default.
+// The latter must be used inside assembly code in case <avr/interrupt.h> is not included.
+ISR(BADISR_vect)
+{
+	// user code here
+}
+
+// mTimer
+void mTimer(int count)
+{
+	int i = 0;
+	TCCR1B |= _BV(WGM12);
+	OCR1A = 0x03E8; // 1 ms
+	TCNT1 = 0x0000;
+	TIFR1 |= _BV(OCF1A);
+
+	while (i < count)
+	{
+		if ((TIFR1 & 0x02) == 0x02)
+		{
+			TIFR1 |= _BV(OCF1A);
+			i++;
+		}
+	}
+	return;
+}
+
+// PWM
+void pwmTimer()
+{
+	// Set Timer0 to Fast PWM mode (WGM00 + WGM01 = 1)
+	TCCR0A |= (1 << WGM00) | (1 << WGM01);
+	TCCR0B &= ~(1 << WGM02); // WGM02 = 0 (part of Fast PWM setup)
+
+	// Set non-inverting mode on OC0A (clear on compare, set at bottom)
+	TCCR0A |= (1 << COM0A1);
+	TCCR0A &= ~(1 << COM0A0);
+
+	// Set prescaler (clk/64)
+	TCCR0B |= (1 << CS01) | (1 << CS00);
+
+	OCR0A = 0; // Start at 0% duty; S-curve will ramp to target speed
+
+	DDRB |= (1 << PB7); // Set PB7 (OC0A) as output for PWM
+}
+
+// ADC
+
+// initialize adc with general channel
+void adc_init(void)
+{
+	// Vref = AVcc, right adjust result, channel ADC0
+	ADMUX = _BV(REFS0);
+
+	// Free-running disabled; we'll retrigger in ISR
+	ADCSRA = _BV(ADEN) | _BV(ADIE); // enable ADC + interrupt
+	ADCSRB = 0x00;
+
+	// Prescaler /32
+	ADCSRA |= _BV(ADPS2) | _BV(ADPS0);
+}
+
+void motor_init(void)
+{
+	// Direction pins
+	MOTOR_DIR_DDR |= MOTOR_PIN_IN1 | MOTOR_PIN_IN2;
+
+	// Enable pins
+	MOTOR_ENA_DDR |= MOTOR_ENA_PIN_A | MOTOR_ENA_PIN_B;
+
+	// Enable EA/EB
+	MOTOR_ENA_PORT |= MOTOR_ENA_PIN_A | MOTOR_ENA_PIN_B;
+
+	// Default direction CW: IN1=1, IN2=0
+	motor_apply_direction();
+}
+
+static inline void motor_apply_direction(void)
+{
+	if (motor_direction_cw)
+	{
+		MOTOR_DIR_PORT |= MOTOR_PIN_IN1;
+		MOTOR_DIR_PORT &= ~MOTOR_PIN_IN2;
+	}
+	else
+	{
+		MOTOR_DIR_PORT &= ~MOTOR_PIN_IN1;
+		MOTOR_DIR_PORT |= MOTOR_PIN_IN2;
+	}
+}
+
+void motor_set_speed(uint8_t duty)
+{
+	OCR0A = duty;
+}
+
+// Jerk-limited S-curve acceleration from start_duty to target_duty
+// duration_ms = total time for the ramp
+// steps       = number of increments in the ramp (more steps = smoother)
+void motor_scurve_accel(uint8_t start_duty,
+uint8_t target_duty,
+uint16_t duration_ms,
+uint8_t steps)
+{
+	// If the configuration is degenerate, just jump straight to the target.
+	if (steps == 0 || duration_ms == 0)
+	{
+		motor_set_speed(target_duty);
+		return;
+	}
+
+	int16_t delta = (int16_t)target_duty - (int16_t)start_duty;
+
+	// Time per step (in ms). Force at least 1 ms so we always delay.
+	uint16_t dt = duration_ms / steps;
+	if (dt == 0)
+	{
+		dt = 1;
+	}
+
+	// Start at the requested initial duty
+	motor_set_speed(start_duty);
+
+	for (uint8_t i = 0; i <= steps; i++)
+	{
+		// Normalized time from 0.0 to 1.0
+		float t = (float)i / (float)steps;
+
+		// Smoothstep S-curve position profile: s(t) = 3 t^2 - 2 t^3
+		float s = t * t * (3.0f - 2.0f * t);
+
+		// Convert back to a duty value
+		float duty_f = (float)start_duty + (float)delta * s;
+
+		// Clamp to 0..255 to stay within 8-bit PWM bounds
+		if (duty_f < 0.0f)
+		{
+			duty_f = 0.0f;
+		}
+		else if (duty_f > 255.0f)
+		{
+			duty_f = 255.0f;
+		}
+
+		motor_set_speed((uint8_t)(duty_f + 0.5f));
+
+		// Wait until the next update
+		mTimer(dt);
+	}
+}
+
+// Convenience wrapper for deceleration; currently uses the same S-curve profile
+// as acceleration but allows a more readable call site.
+void motor_scurve_decel(uint8_t start_duty,
+uint8_t target_duty,
+uint16_t duration_ms,
+uint8_t steps)
+{
+	motor_scurve_accel(start_duty, target_duty, duration_ms, steps);
+}
+
+// Step motor one step with S-curve timing
+void step(int direction) {
+	if (direction == 1) {            // CW
+		current_step++;
+		if (current_step > 4) current_step = 1;
+		} else {                         // CCW
+		current_step--;
+		if (current_step < 1) current_step = 4;
+	}
+
+	switch (current_step) {
+		case (1): PORTA = 0b00010111; break;
+		case (2): PORTA = 0b00011011; break;
+		case (3): PORTA = 0b00101011; break;
+		case (4): PORTA = 0b00100111; break;
+	}
+
+	// S-curve variable delay for smoother and faster motion
+	if (stepper_scurve_active && stepper_total_steps > 0) {
+		uint16_t idx = stepper_step_index;
+		if (idx > stepper_total_steps) {
+			idx = stepper_total_steps;
+		}
+
+		float t;
+		if (stepper_total_steps <= 1) {
+			t = 1.0f;
+			} else {
+			t = (float)idx / (float)(stepper_total_steps - 1);
+		}
+
+		// Smoothstep S-curve profile: s(t) = 3 t^2 - 2 t^3
+		float s = t * t * (3.0f - 2.0f * t);
+
+		// Delay in ms: start longer, shorten in middle, lengthen again
+		const float max_delay_ms = 12.0f; // near start/stop
+		const float min_delay_ms = 3.0f;  // peak speed (faster than original 20 ms)
+
+		float delay_ms = max_delay_ms - (max_delay_ms - min_delay_ms) * s;
+		if (delay_ms < min_delay_ms) delay_ms = min_delay_ms;
+
+		mTimer((int)(delay_ms + 0.5f));
+
+		if (stepper_step_index < 65535) {
+			stepper_step_index++;
+		}
+		if (stepper_step_index >= stepper_total_steps) {
+			stepper_scurve_active = 0;
+		}
+		} else {
+		// Default fixed delay if S-curve not active
+		mTimer(10);
+	}
+}
+
+void step_zero(void){
+	HE_Flag = 0;  // clear before starting
+	stepper_position = 4;
+	while(1){
+		step(direction);
+
+		if(HE_Flag == 1){
+			mTimer(20);   // settle
+			HE_Flag = 0;
+			break;
+		}
+	}
+}
+
+void sort(int OBJ_Type){
+
+	LCDClear();
+	LCDWriteInt(stepper_position,1);
+	LCDWriteInt(OBJ_Type,1);
+	step_count = 0;
+	//aluminum
+	if(OBJ_Type == 1){
+
+		switch(stepper_position){
+
+			case(1): //already sorted
+			stepper_position = 1;
+			break;
+
+			case(2): //steel
+			direction = 1;
+			step_count = 100;
+			stepper_position = 1;
+			break;
+
+			case(3): // white
+			direction = 1;
+			step_count = 50;
+			stepper_position = 1;
+			break;
+
+			case(4): // black
+			direction = 0;
+			step_count = 50;
+			stepper_position = 1;
+			break;
+		}
+
+
+
+		}else{
+		if(OBJ_Type == 2){ //steel
+
+			switch(stepper_position){
+
+				case(1): //aluminum
+				direction = 0;
+				step_count = 100;
+				stepper_position = 2;
+				break;
+
+				case(2): //steel //already sorted
+				stepper_position = 2;
+				break;
+
+				case(3): // white
+				direction = 0;
+				step_count = 50;
+				stepper_position = 2;
+				break;
+
+				case(4): // black
+				direction = 1;
+				step_count = 50;
+				stepper_position = 2;
+				break;
+			}
+
+
+			}else{
+
+			if(OBJ_Type == 3){ //white
+				switch(stepper_position){
+
+					case(1): //aluminum
+					direction = 0;
+					step_count = 50;
+					stepper_position = 3;
+					break;
+
+					case(2): //steel
+					direction = 1;
+					step_count = 50;
+					stepper_position = 3;
+					break;
+
+					case(3): // white
+					stepper_position = 3;
+					break;
+
+					case(4): // black
+					direction = 1;
+					step_count = 100;
+					stepper_position = 3;
+					break;
+				}
+
+
+				}else{
+
+				if(OBJ_Type == 4){ //black
+					switch(stepper_position){
+
+						case(1): //aluminum
+						direction = 1;
+						step_count = 50;
+						stepper_position = 4;
+						break;
+
+						case(2): //steel
+						direction = 0;
+						step_count = 50;
+						stepper_position = 4;
+						break;
+
+						case(3): // white
+						direction = 0;
+						step_count = 100;
+						stepper_position = 4;
+						break;
+
+						case(4): // black
+						stepper_position = 4;
+						break;
+					}
+
+				}
+
+			}
+
+
+
+		}
+
+
+	}
+
+	// Enable S-curve stepping for this move (if any steps are required)
+	if (step_count > 0) {
+		stepper_total_steps = step_count;
+		stepper_step_index = 0;
+		stepper_scurve_active = 1;
+	}
+
+	for (int i = 0; i < step_count; i++) {
+		step(direction);
+	}
+
+	// Ensure S-curve is disabled after move
+	stepper_scurve_active = 0;
+
+}
+
+

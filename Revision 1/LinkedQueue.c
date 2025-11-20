@@ -176,36 +176,16 @@ void enqueue(link **h, link **t, link **nL){
 * 		 which the removed link will be assigned to
 */
 /* This will remove the link and element within the link from the head of the queue */
-// void dequeue(link **h, link **deQueuedLink){
-// 	/* ENTER YOUR CODE HERE */
-// 	*deQueuedLink = *h;	// Will set to NULL if Head points to NULL
-// 	/* Ensure it is not an empty queue */
-// 	if (*h != NULL){
-// 		*h = (*h)->next;
-// 	}/*if*/
-// 	
-// 	return;
-// }/*dequeue*/
-
-void dequeue(link **h, link **t, link **deQueuedLink){
-	
-	*deQueuedLink = *h;	// Store link being removed
-
+void dequeue(link **h, link **deQueuedLink){
+	/* ENTER YOUR CODE HERE */
+	*deQueuedLink = *h;	// Will set to NULL if Head points to NULL
 	/* Ensure it is not an empty queue */
 	if (*h != NULL){
-		
-		// Move the head to the next link
 		*h = (*h)->next;
-		
-		// CRITICAL: If the new head is NULL, the queue is now empty.
-		if (*h == NULL) {
-			*t = NULL; // Set the tail to NULL to maintain consistency.
-		}
-	}
-	// Note: The caller is responsible for calling free(*deQueuedLink)
+	}/*if*/
 	
 	return;
-}
+}/*dequeue*/
 
 
 
