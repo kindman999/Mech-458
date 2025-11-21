@@ -15,7 +15,7 @@ int current_step = 0;
 int direction = 0;					   // 1 - CW, 0 - CCW
 volatile uint8_t stepper_position = 4; // 0-alum, 2-steel, 3-white, 4-black
 volatile uint8_t stepper_flag = 0;	   // 1 means object must be sorted
-volatile uint8_t sorted_flag = 1;	   // 1 means sorter is ready
+volatile uint8_t sorted_flag = 0;	   // 1 means sorter is ready
 volatile int step_count = 0;
 
 volatile uint16_t stepper_steps_left = 0; // How many steps remaining
@@ -44,6 +44,7 @@ volatile uint8_t OBJ_Types[100]; // store object types
 
 // Exit / HE / Stop globals
 volatile uint8_t EX_Flag = 0;
+volatile uint8_t EX_Count = 0;
 element Test;
 element Sort_Element;
 volatile uint8_t HE_Flag = 0;
@@ -102,7 +103,7 @@ int main(int argc, char *argv[])
 	sei(); // Global Enable
 
 	// Startup Sequence
-	motor_scurve_accel(0, 80, 400, 40);
+	motor_scurve_accel(0, 40, 400, 40);
 	step_zero();
 
 	// --- MAIN WHILE LOOP (Replaces Goto) ---
@@ -113,8 +114,8 @@ int main(int argc, char *argv[])
 		if (stepper_steps_left > 0)
 		{
 			// A. S-Curve Math Setup
-			const float max_delay = 12.0f; // Slowest speed (start/stop)
-			const float min_delay = 2.0f;  // Fastest speed (middle)
+			const float max_delay = 10.0f; // Slowest speed (start/stop)
+			const float min_delay = 5.0f;  // Fastest speed (middle)
 			const int ramp_steps = 15;	   // How many steps to accelerate
 
 			float delay_ms = max_delay;
@@ -157,7 +158,6 @@ int main(int argc, char *argv[])
 		// POLLING LOGIC
 		if (STATE == 0)
 		{
-
 			// Stop Request
 			if (stop_request_flag)
 			{
@@ -168,12 +168,6 @@ int main(int argc, char *argv[])
 			}
 
 			// Sorting Logic, only enters if object through reflective, previous object sorted, and the sort has zero steps left
-			if (stepper_flag == 1 && sorted_flag == 1 && stepper_steps_left == 0)
-			{
-				sort(head->e.OBJ_Type);
-				sorted_flag = 0;
-				stepper_flag = 0;
-			}
 
 			// State Transitions
 			if (STATE != 4)
@@ -181,6 +175,12 @@ int main(int argc, char *argv[])
 
 				if (EX_Flag == 1)
 				{
+					if (sorted_flag == 0)
+					{
+						sort(head->e.OBJ_Type);
+						sorted_flag = 1;
+					}
+					EX_Count--;
 					STATE = 3; // Bucket
 				}
 				else if (Entry_Flag == 1)
@@ -217,11 +217,11 @@ int main(int argc, char *argv[])
 			{
 				OBJ_Type = 1; // Aluminum
 			}
-			else if (MIN_reflective_value >= 250 && MIN_reflective_value < 600)
+			else if (MIN_reflective_value >= 250 && MIN_reflective_value < 750)
 			{
 				OBJ_Type = 2; // Steel
 			}
-			else if (MIN_reflective_value >= 600 && MIN_reflective_value < 970)
+			else if (MIN_reflective_value >= 750 && MIN_reflective_value < 970)
 			{
 				OBJ_Type = 3; // White
 			}
@@ -246,14 +246,15 @@ int main(int argc, char *argv[])
 		case 3: // BUCKET STAGE
 
 			// see if stepper has reached certain point in sort, if not stop
-			if (stepper_steps_left > 15)
+			if (stepper_steps_left > 25)
 			{
-				motor_set_speed(0);
+				OCR0A = 0;
 				break;
 			}
 
 			// sorted belt resumes
-			motor_set_speed(80);
+			OCR0A = 40;
+			// commented out below so that the bucket stage doesn't wipe out knowledge of pneding exits anymore
 
 			if (EX_Flag == 1)
 			{
@@ -279,7 +280,7 @@ int main(int argc, char *argv[])
 			dequeue(&head, &tail, &deQueuedLink);
 			free(deQueuedLink);
 
-			sorted_flag = 1;
+			sorted_flag = 0;
 
 			STATE = 0;
 			break;
@@ -404,12 +405,12 @@ void sort(int OBJ_Type)
 			stepper_position = 1;
 			break;
 		case (3):
-			direction = 1;
+			direction = 0;
 			step_count = 50;
 			stepper_position = 1;
 			break;
 		case (4):
-			direction = 0;
+			direction = 1;
 			step_count = 50;
 			stepper_position = 1;
 			break;
@@ -428,12 +429,12 @@ void sort(int OBJ_Type)
 			stepper_position = 2;
 			break;
 		case (3):
-			direction = 0;
+			direction = 1;
 			step_count = 50;
 			stepper_position = 2;
 			break;
 		case (4):
-			direction = 1;
+			direction = 0;
 			step_count = 50;
 			stepper_position = 2;
 			break;
@@ -444,12 +445,12 @@ void sort(int OBJ_Type)
 		switch (stepper_position)
 		{
 		case (1):
-			direction = 0;
+			direction = 1;
 			step_count = 50;
 			stepper_position = 3;
 			break;
 		case (2):
-			direction = 1;
+			direction = 0;
 			step_count = 50;
 			stepper_position = 3;
 			break;
@@ -468,12 +469,12 @@ void sort(int OBJ_Type)
 		switch (stepper_position)
 		{
 		case (1):
-			direction = 1;
+			direction = 0;
 			step_count = 50;
 			stepper_position = 4;
 			break;
 		case (2):
-			direction = 0;
+			direction = 1;
 			step_count = 50;
 			stepper_position = 4;
 			break;
@@ -514,6 +515,7 @@ ISR(INT0_vect)
 ISR(INT1_vect)
 {
 	EX_Flag = 1;
+	EX_Count++;
 }
 
 ISR(INT2_vect)
