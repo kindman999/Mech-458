@@ -54,6 +54,10 @@ volatile uint8_t Type_3 = 0;
 volatile uint8_t Type_4 = 0;
 volatile uint8_t stop_request_flag = 0;
 
+volatile uint8_t conveyor_hold_for_stepper = 0;      // request to stop at exit
+volatile uint8_t conveyor_stopped_for_stepper = 0;   // conveyor currently held
+
+
 // --- FUNCTION PROTOTYPES FOR LOCAL LOGIC ---
 void step(int);
 void step_zero(void);
@@ -514,6 +518,9 @@ ISR(INT0_vect)
 ISR(INT1_vect)
 {
 	EX_Flag = 1;
+	if(stepper_scurve_active){
+		conveyor_hold_for_stepper = 1;
+	}
 }
 
 ISR(INT2_vect)
