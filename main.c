@@ -54,10 +54,6 @@ volatile uint8_t Type_3 = 0;
 volatile uint8_t Type_4 = 0;
 volatile uint8_t stop_request_flag = 0;
 
-volatile uint8_t conveyor_hold_for_stepper = 0;      // request to stop at exit
-volatile uint8_t conveyor_stopped_for_stepper = 0;   // conveyor currently held
-
-
 // --- FUNCTION PROTOTYPES FOR LOCAL LOGIC ---
 void step(int);
 void step_zero(void);
@@ -156,36 +152,11 @@ int main(int argc, char *argv[])
 			// F. Update Counters
 			stepper_steps_left--;
 			steps_moved_so_far++;
-			if(stepper_steps_left == 0){
-				stepper_scurve_active = 0;
-			}
 		}
 
 		// POLLING LOGIC
 		if (STATE == 0)
 		{
-
-        // ----------------------------------------------------
-        // Hold conveyor at exit until stepper is fully sorted
-        // ----------------------------------------------------
-        if (conveyor_hold_for_stepper && !conveyor_stopped_for_stepper)
-        {
-            // Smoothly stop the conveyor at the exit sensor
-            uint8_t current_duty = OCR0A;
-            motor_scurve_decel(current_duty, 0, 300, 30); // tune 300 ms / 30 steps if needed
-            conveyor_stopped_for_stepper = 1;
-        }
-
-        // If we're stopped for the stepper and the stepper is now done,
-        // restart the conveyor.
-        if (conveyor_stopped_for_stepper && !stepper_scurve_active)
-        {
-            // Resume to your normal run speed (80 here)
-            motor_scurve_accel(0, 80, 300, 30);           // tune as needed
-            conveyor_stopped_for_stepper = 0;
-            conveyor_hold_for_stepper = 0;
-        }
-
 			// Stop Request
 			if (stop_request_flag)
 			{
@@ -525,7 +496,6 @@ void sort(int OBJ_Type)
 		stepper_dir_request = direction;
 		stepper_steps_left = step_count;
 		steps_moved_so_far = 0; // Reset the S-Curve counter
-		stepper_scurve_active = 1;
 	}
 }
 
@@ -543,9 +513,6 @@ ISR(INT0_vect)
 ISR(INT1_vect)
 {
 	EX_Flag = 1;
-	if(stepper_scurve_active){
-		conveyor_hold_for_stepper = 1;
-	}
 }
 
 ISR(INT2_vect)
