@@ -44,6 +44,7 @@ volatile uint8_t OBJ_Types[100]; // store object types
 
 // Exit / HE / Stop globals
 volatile uint8_t EX_Flag = 0;
+volatile uint8_t EX_Count = 0;
 element Test;
 element Sort_Element;
 volatile uint8_t HE_Flag = 0;
@@ -180,6 +181,7 @@ int main(int argc, char *argv[])
 
 				if (EX_Flag == 1)
 				{
+					EX_Count--;
 					STATE = 3; // Bucket
 				}
 				else if (Entry_Flag == 1)
@@ -253,11 +255,11 @@ int main(int argc, char *argv[])
 
 			// sorted belt resumes
 			motor_set_speed(80);
-
-			if (EX_Flag == 1)
-			{
-				EX_Flag = 0;
-			}
+//commented out below so that the bucket stage doesn't wipe out knowledge of pneding exits anymore
+			//if (EX_Flag == 1)
+			//{
+				//EX_Flag = 0;
+			//}
 
 			Test = firstValue(&head);
 			int Current_OBJ_Type = Test.OBJ_Type;
@@ -513,6 +515,7 @@ ISR(INT0_vect)
 ISR(INT1_vect)
 {
 	EX_Flag = 1;
+	EX_Count++;
 }
 
 ISR(INT2_vect)
