@@ -175,11 +175,14 @@ int main(int argc, char *argv[])
 
 				if (EX_Flag == 1)
 				{
+<<<<<<< HEAD
 					if (sorted_flag == 0)
 					{
 						sort(head->e.OBJ_Type);
 						sorted_flag = 1;
 					}
+=======
+>>>>>>> ffe2176b41ff6fc8ec02bfb43f6eb6abf8e72584
 					EX_Count--;
 					STATE = 3; // Bucket
 				}
@@ -253,6 +256,7 @@ int main(int argc, char *argv[])
 			}
 
 			// sorted belt resumes
+<<<<<<< HEAD
 			OCR0A = 40;
 			// commented out below so that the bucket stage doesn't wipe out knowledge of pneding exits anymore
 
@@ -260,6 +264,14 @@ int main(int argc, char *argv[])
 			{
 				EX_Flag = 0;
 			}
+=======
+			motor_set_speed(80);
+//commented out below so that the bucket stage doesn't wipe out knowledge of pneding exits anymore
+			//if (EX_Flag == 1)
+			//{
+				//EX_Flag = 0;
+			//}
+>>>>>>> ffe2176b41ff6fc8ec02bfb43f6eb6abf8e72584
 
 			Test = firstValue(&head);
 			int Current_OBJ_Type = Test.OBJ_Type;
