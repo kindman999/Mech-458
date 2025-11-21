@@ -164,9 +164,6 @@ int main(int argc, char *argv[])
 		// POLLING LOGIC
 		if (STATE == 0)
 		{
-			    // POLLING LOGIC
-    if (STATE == 0)
-    {
 
         // ----------------------------------------------------
         // Hold conveyor at exit until stepper is fully sorted
