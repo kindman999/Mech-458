@@ -21,7 +21,7 @@ volatile int step_count = 0;
 volatile uint16_t stepper_steps_left = 0; // How many steps remaining
 volatile int stepper_dir_request = 0;	  // 1=CW, 0=CCW
 volatile int steps_moved_so_far = 0;	  // For S-Curve calculation
-
+volatile int same_object_flag = 0;
 // Stepper S-curve control
 volatile uint8_t stepper_scurve_active = 0;
 volatile uint16_t stepper_total_steps = 0;
@@ -114,9 +114,9 @@ int main(int argc, char *argv[])
 		if (stepper_steps_left > 0)
 		{
 			// A. S-Curve Math Setup
-			const float max_delay = 10.0f; // Slowest speed (start/stop)
+			const float max_delay = 12.0f; // Slowest speed (start/stop)
 			const float min_delay = 5.0f;  // Fastest speed (middle)
-			const int ramp_steps = 15;	   // How many steps to accelerate
+			const int ramp_steps = 12;	   // How many steps to accelerate
 
 			float delay_ms = max_delay;
 
@@ -175,7 +175,8 @@ int main(int argc, char *argv[])
 
 				if (EX_Flag == 1)
 				{
-					if (sorted_flag == 0)
+					EX_Flag = 0;
+					if (sorted_flag == 0 || (stepper_steps_left == 0))
 					{
 						sort(head->e.OBJ_Type);
 						sorted_flag = 1;
@@ -246,20 +247,22 @@ int main(int argc, char *argv[])
 		case 3: // BUCKET STAGE
 
 			// see if stepper has reached certain point in sort, if not stop
-			if (stepper_steps_left > 25)
+			if ((stepper_steps_left > 20 || (stepper_steps_left < 10 && stepper_steps_left > 0)) && same_object_flag == 0)
 			{
 				OCR0A = 0;
 				break;
 			}
 
 			// sorted belt resumes
-			OCR0A = 40;
-			// commented out below so that the bucket stage doesn't wipe out knowledge of pneding exits anymore
 
-			if (EX_Flag == 1)
+			OCR0A = 50;
+
+			if (stepper_steps_left > 0)
+
 			{
-				EX_Flag = 0;
+				break; // Belt is running, but we stay in Case 3 to protect the stepper logic.
 			}
+			// commented out below so that the bucket stage doesn't wipe out knowledge of pneding exits anymore
 
 			Test = firstValue(&head);
 			int Current_OBJ_Type = Test.OBJ_Type;
@@ -268,20 +271,20 @@ int main(int argc, char *argv[])
 
 			OBJ_Types[Current_OBJ_Num - 1] = Current_OBJ_Type;
 
-			LCDClear();
-			LCDWriteString("Type:");
-			LCDWriteInt(Current_OBJ_Type, 1);
-			LCDWriteString(" #:");
-			LCDWriteInt(Current_OBJ_Num, 2);
-			LCDGotoXY(0, 1);
-			LCDWriteString("RF:");
-			LCDWriteInt(Current_Reflective, 4);
+			// 			LCDClear();
+			// 			LCDWriteString("Type:");
+			// 			LCDWriteInt(Current_OBJ_Type, 1);
+			// 			LCDWriteString(" #:");
+			// 			LCDWriteInt(Current_OBJ_Num, 2);
+			// 			LCDGotoXY(0, 1);
+			// 			LCDWriteString("RF:");
+			// 			LCDWriteInt(Current_Reflective, 4);
 
 			dequeue(&head, &tail, &deQueuedLink);
 			free(deQueuedLink);
 
 			sorted_flag = 0;
-
+			same_object_flag = 0;
 			STATE = 0;
 			break;
 
@@ -398,6 +401,7 @@ void sort(int OBJ_Type)
 		{
 		case (1):
 			stepper_position = 1;
+			same_object_flag = 1;
 			break;
 		case (2):
 			direction = 1;
@@ -427,6 +431,7 @@ void sort(int OBJ_Type)
 			break;
 		case (2):
 			stepper_position = 2;
+			same_object_flag = 1;
 			break;
 		case (3):
 			direction = 1;
@@ -456,6 +461,7 @@ void sort(int OBJ_Type)
 			break;
 		case (3):
 			stepper_position = 3;
+			same_object_flag = 1;
 			break;
 		case (4):
 			direction = 1;
@@ -485,6 +491,7 @@ void sort(int OBJ_Type)
 			break;
 		case (4):
 			stepper_position = 4;
+			same_object_flag = 1;
 			break;
 		}
 	}
