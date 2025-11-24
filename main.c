@@ -103,7 +103,7 @@ int main(int argc, char *argv[])
 	sei(); // Global Enable
 
 	// Startup Sequence
-	motor_scurve_accel(0, 40, 400, 40);
+	motor_scurve_accel(0, 50, 400, 40);
 	step_zero();
 
 	// --- MAIN WHILE LOOP (Replaces Goto) ---
@@ -175,13 +175,15 @@ int main(int argc, char *argv[])
 
 				if (EX_Flag == 1)
 				{
-					EX_Flag = 0;
+
 					if (sorted_flag == 0 || (stepper_steps_left == 0))
 					{
 						sort(head->e.OBJ_Type);
 						sorted_flag = 1;
+						EX_Flag = 0;
+						EX_Count--;
 					}
-					EX_Count--;
+
 					STATE = 3; // Bucket
 				}
 				else if (Entry_Flag == 1)
@@ -247,7 +249,7 @@ int main(int argc, char *argv[])
 		case 3: // BUCKET STAGE
 
 			// see if stepper has reached certain point in sort, if not stop
-			if ((stepper_steps_left > 20 || (stepper_steps_left < 10 && stepper_steps_left > 0)) && same_object_flag == 0)
+			if ((stepper_steps_left > 30) && same_object_flag == 0)
 			{
 				OCR0A = 0;
 				break;
