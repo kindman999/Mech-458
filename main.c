@@ -7,6 +7,26 @@
 #include "LinkedQueue.h"
 #include "drivers.h" // Include the new drivers file
 
+// --- STEPPER S-CURVE TABLE (INT-ONLY) ---
+#define STEPPER_RAMP_STEPS 12
+// Index 0 = slowest (start/stop), index 12 = fastest (middle / cruise)
+const uint8_t stepper_delay_table[STEPPER_RAMP_STEPS + 1] =
+{
+    12, // 0  - very slow
+    11, // 1
+    10, // 2
+    9,  // 3
+    8,  // 4
+    7,  // 5
+    6,  // 6
+    6,  // 7
+    6,  // 8
+    6,  // 9
+    5,  // 10
+    5,  // 11
+    5   // 12 - fastest
+};
+
 // --- GLOBAL VARIABLES ---
 volatile char STATE = 0;
 
@@ -23,9 +43,9 @@ volatile int stepper_dir_request = 0;	  // 1=CW, 0=CCW
 volatile int steps_moved_so_far = 0;	  // For S-Curve calculation
 volatile int same_object_flag = 0;
 // Stepper S-curve control
-volatile uint8_t stepper_scurve_active = 0;
+//volatile uint8_t stepper_scurve_active = 0; unused variable
 volatile uint16_t stepper_total_steps = 0;
-volatile uint16_t stepper_step_index = 0;
+//volatile uint16_t stepper_step_index = 0; unused variable
 
 // Sensor globals
 volatile uint8_t OI_Counter = 0;
@@ -54,6 +74,12 @@ volatile uint8_t Type_2 = 0;
 volatile uint8_t Type_3 = 0;
 volatile uint8_t Type_4 = 0;
 volatile uint8_t stop_request_flag = 0;
+
+// PAUSE BUTTON GLOBALS ---
+volatile uint8_t pause_request_flag = 0;   // Set by pause button ISR
+volatile uint8_t pause_active = 0;         // Prevent re-entrancy
+volatile uint8_t saved_duty_cycle = 0;     // Store OCR0A before pausing
+
 
 // --- FUNCTION PROTOTYPES FOR LOCAL LOGIC ---
 void step(int);
@@ -91,6 +117,11 @@ int main(int argc, char *argv[])
 	DDRD = 0b11110000;
 	DDRC = 0xFF;
 
+	// PAUSE BUTTON PIN SETUP (PE4 / INT4) ---
+	DDRE &= ~(1 << PE4);   // PE4 as input
+	PORTE |= (1 << PE4);   // Enable pull-up on pause button
+
+
 	// Interrupt Configuration
 	EICRA |= _BV(ISC01) | _BV(ISC00); // INT0 Rising (OI)
 	EICRA |= _BV(ISC11) | _BV(ISC10); // INT1 Rising (EX)
@@ -98,7 +129,12 @@ int main(int argc, char *argv[])
 	EICRA |= _BV(ISC21);			  // INT2 Falling (HE)
 	EICRA |= _BV(ISC31) | _BV(ISC30); // INT3 Rising (Stop)
 
-	EIMSK |= (_BV(INT0) | _BV(INT1) | _BV(INT2) | _BV(INT3));
+	// PAUSE BUTTON INTERRUPT CONFIG (INT4, falling edge) ---
+	EICRB &= ~(_BV(ISC40)); // ISC41:40 = 10 -> falling edge
+	EICRB |= _BV(ISC41);    // INT4 Falling (Pause)
+
+	EIMSK |= (_BV(INT0) | _BV(INT1) | _BV(INT2) | _BV(INT3) | _BV(INT4));
+
 
 	sei(); // Global Enable
 
@@ -113,46 +149,68 @@ int main(int argc, char *argv[])
 		// stepper, always passive
 		if (stepper_steps_left > 0)
 		{
-			// A. S-Curve Math Setup
-			const float max_delay = 12.0f; // Slowest speed (start/stop)
-			const float min_delay = 5.0f;  // Fastest speed (middle)
-			const int ramp_steps = 12;	   // How many steps to accelerate
+			uint8_t delay_ms;
+			uint8_t idx;
 
-			float delay_ms = max_delay;
-
-			// Calculate Progress
-			if (steps_moved_so_far < ramp_steps)
+			// ACCELERATION PHASE
+			if (steps_moved_so_far < STEPPER_RAMP_STEPS)
 			{
-				// ACCELERATION PHASE
-				float t = (float)steps_moved_so_far / (float)ramp_steps;
-				float s = t * t * (3.0f - 2.0f * t); // Smoothstep equation
-				delay_ms = max_delay - ((max_delay - min_delay) * s);
+				idx = (uint8_t)steps_moved_so_far;
 			}
-			else if (stepper_steps_left <= ramp_steps)
+			// DECELERATION PHASE
+			else if (stepper_steps_left <= STEPPER_RAMP_STEPS)
 			{
-				// DECELERATION PHASE
-				float t = (float)stepper_steps_left / (float)ramp_steps;
-				float s = t * t * (3.0f - 2.0f * t);
-				delay_ms = max_delay - ((max_delay - min_delay) * s);
+				idx = (uint8_t)stepper_steps_left;
 			}
+			// CRUISE (middle) PHASE
 			else
 			{
-				// Full Speed
-				delay_ms = min_delay;
+				idx = STEPPER_RAMP_STEPS;
 			}
 
-			if (delay_ms < min_delay)
-				delay_ms = min_delay;
+			if (idx > STEPPER_RAMP_STEPS)
+			{
+				idx = STEPPER_RAMP_STEPS;
+			}
 
-			// EXECUTE THE STEP
-			step(stepper_dir_request); // Moves instantly
+			delay_ms = stepper_delay_table[idx];
 
-			// delay
-			mTimer((int)(delay_ms + 0.5f));
+			step(stepper_dir_request);  // Execute one step
+			mTimer(delay_ms);           // Integer delay from table
 
-			// F. Update Counters
 			stepper_steps_left--;
 			steps_moved_so_far++;
+			}
+			// PAUSE HANDLING (TEMPORARY STOP + RESTART) ---
+		if (pause_request_flag)
+		{
+			pause_request_flag = 0;
+
+			// Avoid nested pauses
+			if (!pause_active)
+			{
+				pause_active = 1;
+
+				// Save current conveyor speed (duty cycle)
+				saved_duty_cycle = OCR0A;
+
+				// Ramp down to 0 using same S-curve function as startup/shutdown
+				if (saved_duty_cycle > 0)
+				{
+					motor_scurve_decel(saved_duty_cycle, 0, 1000, 50);
+				}
+
+				// Pause duration (ms) - adjust as you like
+				mTimer(1000);
+
+				// Ramp back up to previous speed
+				if (saved_duty_cycle > 0)
+				{
+					motor_scurve_accel(0, saved_duty_cycle, 400, 40);
+				}
+
+				pause_active = 0;
+			}
 		}
 
 		// POLLING LOGIC
@@ -507,6 +565,7 @@ void sort(int OBJ_Type)
 		stepper_dir_request = direction;
 		stepper_steps_left = step_count;
 		steps_moved_so_far = 0; // Reset the S-Curve counter
+		stepper_total_steps = step_count;
 	}
 }
 
@@ -532,9 +591,15 @@ ISR(INT2_vect)
 	HE_Flag = 1;
 }
 
+// INT3 = STOP BUTTON (FULL RAMP-DOWN TO END STATE)
 ISR(INT3_vect)
 {
 	stop_request_flag = 1;
+}
+// INT4 = PAUSE BUTTON (TEMPORARY STOP & RESTART)
+ISR(INT4_vect)
+{
+	pause_request_flag = 1;
 }
 
 ISR(ADC_vect)
