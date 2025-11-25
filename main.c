@@ -133,7 +133,7 @@ int main(int argc, char *argv[])
 	EICRB &= ~(_BV(ISC40)); // ISC41:40 = 10 -> falling edge
 	EICRB |= _BV(ISC41);    // INT4 Falling (Pause)
 
-	EIMSK |= (_BV(INT0) | _BV(INT1) | _BV(INT2) | _BV(INT3) | _BV(INT4));
+	EIMSK |= (_BV(INT0) | _BV(INT1) | _BV(INT2) | _BV(INT3) | _BV(INT4);
 
 
 	sei(); // Global Enable
