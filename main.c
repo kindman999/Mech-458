@@ -227,7 +227,8 @@ if (pause_request_flag)
         }
 
         // Re-enable INT4 now that S-curve is complete
-        EIMSK |= _BV(INT4);
+		EIFR |= _BV(INTF4); //clear INT4 flag
+        EIMSK |= _BV(INT4); //re-enable INT4
 
         pause_active = 0;
     }
