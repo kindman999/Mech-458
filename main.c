@@ -13,7 +13,11 @@
 const uint8_t stepper_delay_table[STEPPER_RAMP_STEPS + 1] =
 	{
 		18, // 0 - very slow
+<<<<<<< HEAD
 		17, // 1
+=======
+		17,	// 1
+>>>>>>> e148df3ef5778b25d49e3cbc7dcea403ea004278
 		16, // 2
 		15, // 3
 		14, // 4
@@ -183,6 +187,7 @@ int main(int argc, char *argv[])
 			stepper_steps_left--;
 			steps_moved_so_far++;
 		}
+<<<<<<< HEAD
 		// PAUSE HANDLING (TOGGLE PAUSE / RESUME)
 		if (pause_request_flag && !pause_active)
 		{
@@ -233,6 +238,59 @@ int main(int argc, char *argv[])
 
 			pause_active = 0;
 		}
+=======
+// PAUSE HANDLING (TOGGLE PAUSE / RESUME)
+if (pause_request_flag && !pause_active)
+{
+    // Consume the request from ISR
+    pause_request_flag = 0;
+    pause_active = 1;
+
+    // Disable INT4 while we are handling pause/resume to avoid extra toggles
+    EIMSK &= ~_BV(INT4);
+
+    if (!system_paused)
+    {
+        // RUNNING → go into PAUSE
+        system_paused = 1;
+
+        // Save current conveyor speed (duty cycle)
+        saved_duty_cycle = OCR0A;
+        if (saved_duty_cycle == 0)
+        {
+            // Safety fallback in case we somehow paused at 0
+            saved_duty_cycle = 50;   // your normal run speed
+        }
+
+        // Smooth ramp down to a stop
+        motor_scurve_decel(saved_duty_cycle, 0, 1000, 50);
+        OCR0A = 0;   // ensure conveyor is fully stopped
+
+        // STOP ALL MOTION: kill any in-progress stepper move
+        stepper_steps_left = 0;
+        steps_moved_so_far = 0;
+
+        // Return the state machine to the idle/polling state
+        STATE = 0;
+    }
+    else
+    {
+        // PAUSED → RESUME
+        system_paused = 0;
+
+        // Ramp back up to previous speed
+        motor_scurve_accel(0, saved_duty_cycle, 400, 40);
+        OCR0A = saved_duty_cycle;
+    }
+
+    // Clear any pending INT4 flag and re-enable the pause interrupt
+    EIFR |= _BV(INTF4);   // clear INT4 flag
+    EIMSK |= _BV(INT4);   // re-enable INT4
+
+    pause_active = 0;
+}
+
+>>>>>>> e148df3ef5778b25d49e3cbc7dcea403ea004278
 
 		// POLLING LOGIC
 		if (STATE == 0)
