@@ -83,6 +83,7 @@ volatile uint8_t stop_request_flag = 0;
 volatile uint8_t pause_request_flag = 0; // Set by pause button ISR
 volatile uint8_t pause_active = 0;		 // Prevent re-entrancy
 volatile uint8_t saved_duty_cycle = 0;	 // Store OCR0A before pausing
+volatile uint8_t system_paused = 0;
 
 // --- FUNCTION PROTOTYPES FOR LOCAL LOGIC ---
 void step(int);
@@ -182,12 +183,11 @@ int main(int argc, char *argv[])
 			stepper_steps_left--;
 			steps_moved_so_far++;
 		}
-		// PAUSE HANDLING (TEMPORARY STOP + RESTART) ---
+		// PAUSE HANDLING (TEMPORARY STOP + RESTART by button pushing) ---
 		if (pause_request_flag)
 		{
 			pause_request_flag = 0;
 
-			// Avoid nested pauses
 			if (!pause_active)
 			{
 				pause_active = 1;
@@ -201,13 +201,17 @@ int main(int argc, char *argv[])
 					motor_scurve_decel(saved_duty_cycle, 0, 1000, 50);
 				}
 
-				// Pause duration (ms) - adjust as you like
-				mTimer(1000);
+				// show LCD here?
 
-				// Ramp back up to previous speed
-				if (saved_duty_cycle > 0)
+				// if currently paused press to resume
+				else
 				{
-					motor_scurve_accel(0, saved_duty_cycle, 400, 40);
+					system_paused = 0;
+
+					//ramp back to previous speed
+					if (saved_duty_cycle > 0){
+						motor_scurve_accel(0, saved_duty_cycle, 400, 40);
+					}
 				}
 
 				pause_active = 0;
