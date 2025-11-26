@@ -183,56 +183,57 @@ int main(int argc, char *argv[])
 			stepper_steps_left--;
 			steps_moved_so_far++;
 		}
-		// PAUSE HANDLING (TOGGLE PAUSE / RESUME WITH SAFE DEBOUNCE) ---
-if (pause_request_flag)
+// PAUSE HANDLING (TOGGLE PAUSE / RESUME)
+if (pause_request_flag && !pause_active)
 {
     // Consume the request from ISR
     pause_request_flag = 0;
+    pause_active = 1;
 
-    if (!pause_active)
+    // Disable INT4 while we are handling pause/resume to avoid extra toggles
+    EIMSK &= ~_BV(INT4);
+
+    if (!system_paused)
     {
-        pause_active = 1;
+        // RUNNING → go into PAUSE
+        system_paused = 1;
 
-        // Disable INT4 while we are handling pause/resume to avoid extra toggles
-        EIMSK &= ~_BV(INT4);
-
-        if (!system_paused)
+        // Save current conveyor speed (duty cycle)
+        saved_duty_cycle = OCR0A;
+        if (saved_duty_cycle == 0)
         {
-            // RUNNING → go into PAUSE
-            system_paused = 1;
-
-            // Save current conveyor speed (duty cycle)
-            saved_duty_cycle = OCR0A;
-            if (saved_duty_cycle == 0)
-            {
-                // Safety fallback in case we somehow paused at 0
-                saved_duty_cycle = 50;
-            }
-
-            // Ramp down to 0
-            motor_scurve_decel(saved_duty_cycle, 0, 1000, 50);
-            OCR0A = 0;
-
-            // show paused message
-            
-        }
-        else
-        {
-            // PAUSED → RESUME
-            system_paused = 0;
-
-            // Ramp back up to previous speed
-            motor_scurve_accel(0, saved_duty_cycle, 400, 40);
-            OCR0A = saved_duty_cycle;
+            // Safety fallback in case we somehow paused at 0
+            saved_duty_cycle = 50;   // your normal run speed
         }
 
-        // Re-enable INT4 now that S-curve is complete
-		EIFR |= _BV(INTF4); //clear INT4 flag
-        EIMSK |= _BV(INT4); //re-enable INT4
+        // Smooth ramp down to a stop
+        motor_scurve_decel(saved_duty_cycle, 0, 1000, 50);
+        OCR0A = 0;   // ensure conveyor is fully stopped
 
-        pause_active = 0;
+        // STOP ALL MOTION: kill any in-progress stepper move
+        stepper_steps_left = 0;
+        steps_moved_so_far = 0;
+
+        // Return the state machine to the idle/polling state
+        STATE = 0;
     }
+    else
+    {
+        // PAUSED → RESUME
+        system_paused = 0;
+
+        // Ramp back up to previous speed
+        motor_scurve_accel(0, saved_duty_cycle, 400, 40);
+        OCR0A = saved_duty_cycle;
+    }
+
+    // Clear any pending INT4 flag and re-enable the pause interrupt
+    EIFR |= _BV(INTF4);   // clear INT4 flag
+    EIMSK |= _BV(INT4);   // re-enable INT4
+
+    pause_active = 0;
 }
+
 
 		// POLLING LOGIC
 		if (STATE == 0)
