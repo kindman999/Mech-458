@@ -135,7 +135,8 @@ int main(int argc, char *argv[])
 	EICRB &= ~(_BV(ISC40)); // ISC41:40 = 10 -> falling edge
 	EICRB |= _BV(ISC41);	// INT4 Falling (Pause)
 
-	EIMSK |= (_BV(INT0) | _BV(INT1) | _BV(INT2) | _BV(INT3) | _BV(INT4));
+	EIMSK |= (_BV(INT0) | _BV(INT1) | _BV(INT2) | _BV(INT3) | _BV(INT4);
+
 
 	sei(); // Global Enable
 
@@ -146,7 +147,6 @@ int main(int argc, char *argv[])
 	// --- MAIN WHILE LOOP (Replaces Goto) ---
 	while (1)
 	{
-
 		// stepper, always passive
 		if (stepper_steps_left > 0)
 		{
@@ -388,8 +388,7 @@ int main(int argc, char *argv[])
 			mTimer(2000);
 
 			while (1)
-				;
-			// Stop here forever
+				; // Stop here forever
 			break;
 		}
 	}
@@ -466,7 +465,7 @@ void sort(int OBJ_Type)
 			same_object_flag = 1;
 			break;
 		case (2):
-			// direction = 1;
+			direction = 1;
 			step_count = 100;
 			stepper_position = 1;
 			break;
@@ -487,7 +486,7 @@ void sort(int OBJ_Type)
 		switch (stepper_position)
 		{
 		case (1):
-			// direction = 0;
+			direction = 0;
 			step_count = 100;
 			stepper_position = 2;
 			break;
@@ -526,7 +525,7 @@ void sort(int OBJ_Type)
 			same_object_flag = 1;
 			break;
 		case (4):
-			// direction = 1;
+			direction = 1;
 			step_count = 100;
 			stepper_position = 3;
 			break;
@@ -547,7 +546,7 @@ void sort(int OBJ_Type)
 			stepper_position = 4;
 			break;
 		case (3):
-			// direction = 0;
+			direction = 0;
 			step_count = 100;
 			stepper_position = 4;
 			break;
@@ -585,7 +584,6 @@ ISR(INT0_vect)
 ISR(INT1_vect)
 {
 	EX_Flag = 1;
-	OCR0A = 0;
 	EX_Count++;
 }
 
