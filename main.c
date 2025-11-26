@@ -13,7 +13,7 @@
 const uint8_t stepper_delay_table[STEPPER_RAMP_STEPS + 1] =
 	{
 		18, // 0 - very slow
-		7,	// 1
+		17, // 1
 		16, // 2
 		15, // 3
 		14, // 4
@@ -83,11 +83,13 @@ volatile uint8_t stop_request_flag = 0;
 volatile uint8_t pause_request_flag = 0; // Set by pause button ISR
 volatile uint8_t pause_active = 0;		 // Prevent re-entrancy
 volatile uint8_t saved_duty_cycle = 0;	 // Store OCR0A before pausing
+volatile uint8_t system_paused = 0;
 
 // --- FUNCTION PROTOTYPES FOR LOCAL LOGIC ---
 void step(int);
 void step_zero(void);
 void sort(int);
+void motor_stop(void);
 
 int main(int argc, char *argv[])
 {
@@ -135,13 +137,12 @@ int main(int argc, char *argv[])
 	EICRB &= ~(_BV(ISC40)); // ISC41:40 = 10 -> falling edge
 	EICRB |= _BV(ISC41);	// INT4 Falling (Pause)
 
-	EIMSK |= (_BV(INT0) | _BV(INT1) | _BV(INT2) | _BV(INT3) | _BV(INT4);
-
+	EIMSK |= (_BV(INT0) | _BV(INT1) | _BV(INT2) | _BV(INT3) | _BV(INT4));
 
 	sei(); // Global Enable
 
 	// Startup Sequence
-	motor_scurve_accel(0, 50, 400, 40);
+	motor_scurve_accel(0, 80, 400, 40);
 	step_zero();
 
 	// --- MAIN WHILE LOOP (Replaces Goto) ---
@@ -182,36 +183,55 @@ int main(int argc, char *argv[])
 			stepper_steps_left--;
 			steps_moved_so_far++;
 		}
-		// PAUSE HANDLING (TEMPORARY STOP + RESTART) ---
-		if (pause_request_flag)
+		// PAUSE HANDLING (TOGGLE PAUSE / RESUME)
+		if (pause_request_flag && !pause_active)
 		{
+			// Consume the request from ISR
 			pause_request_flag = 0;
+			pause_active = 1;
 
-			// Avoid nested pauses
-			if (!pause_active)
+			// Disable INT4 while we are handling pause/resume to avoid extra toggles
+			EIMSK &= ~_BV(INT4);
+
+			if (!system_paused)
 			{
-				pause_active = 1;
+				// RUNNING → go into PAUSE
+				system_paused = 1;
 
 				// Save current conveyor speed (duty cycle)
 				saved_duty_cycle = OCR0A;
-
-				// Ramp down to 0 using same S-curve function as startup/shutdown
-				if (saved_duty_cycle > 0)
+				if (saved_duty_cycle == 0)
 				{
-					motor_scurve_decel(saved_duty_cycle, 0, 1000, 50);
+					// Safety fallback in case we somehow paused at 0
+					saved_duty_cycle = 50; // your normal run speed
 				}
 
-				// Pause duration (ms) - adjust as you like
-				mTimer(1000);
+				// Smooth ramp down to a stop
+				motor_scurve_decel(saved_duty_cycle, 0, 1000, 50);
+				OCR0A = 0; // ensure conveyor is fully stopped
+
+				// STOP ALL MOTION: kill any in-progress stepper move
+				stepper_steps_left = 0;
+				steps_moved_so_far = 0;
+
+				// Return the state machine to the idle/polling state
+				STATE = 0;
+			}
+			else
+			{
+				// PAUSED → RESUME
+				system_paused = 0;
 
 				// Ramp back up to previous speed
-				if (saved_duty_cycle > 0)
-				{
-					motor_scurve_accel(0, saved_duty_cycle, 400, 40);
-				}
-
-				pause_active = 0;
+				motor_scurve_accel(0, saved_duty_cycle, 400, 40);
+				OCR0A = saved_duty_cycle;
 			}
+
+			// Clear any pending INT4 flag and re-enable the pause interrupt
+			EIFR |= _BV(INTF4); // clear INT4 flag
+			EIMSK |= _BV(INT4); // re-enable INT4
+
+			pause_active = 0;
 		}
 
 		// POLLING LOGIC
@@ -283,14 +303,16 @@ int main(int argc, char *argv[])
 			{
 				OBJ_Type = 2; // Steel
 			}
-			else if (MIN_reflective_value >= 750 && MIN_reflective_value < 970)
+			else if (MIN_reflective_value >= 750 && MIN_reflective_value < 940)
 			{
 				OBJ_Type = 3; // White
 			}
-			else if (MIN_reflective_value >= 970 && MIN_reflective_value <= 1023)
+			else if (MIN_reflective_value >= 940 && MIN_reflective_value <= 1023)
 			{
 				OBJ_Type = 4; // Black
 			}
+			// 			LCDClear();
+			// 			LCDWriteInt(MIN_reflective_value,4);
 
 			// Enqueue
 			initLink(&newlink);
@@ -308,7 +330,7 @@ int main(int argc, char *argv[])
 		case 3: // BUCKET STAGE
 
 			// see if stepper has reached certain point in sort, if not stop
-			if ((stepper_steps_left > 30) && same_object_flag == 0)
+			if ((stepper_steps_left > 8) && same_object_flag == 0)
 			{
 				OCR0A = 0;
 				break;
@@ -316,7 +338,8 @@ int main(int argc, char *argv[])
 
 			// sorted belt resumes
 
-			OCR0A = 50;
+			OCR0A = 80;
+			motor_apply_direction();
 
 			if (stepper_steps_left > 0)
 
@@ -438,7 +461,7 @@ void step_zero(void)
 	while (1)
 	{
 		step(direction);
-		mTimer(10);
+		mTimer(15);
 		if (HE_Flag == 1)
 		{
 			mTimer(20);
@@ -448,11 +471,20 @@ void step_zero(void)
 	}
 }
 
+void motor_stop(void)
+{
+	// 	#define MOTOR_PIN_IN1  (1 << PL7) // motor input A
+	// 	#define MOTOR_PIN_IN2  (1 << PL6) // motor input B
+	//
+	// 	#define MOTOR_ENA_PIN_A (1 << PL4) // EA
+	// 	#define MOTOR_ENA_PIN_B (1 << PL5) // EB
+	PORTL = 0b11110000;
+}
 void sort(int OBJ_Type)
 {
-	LCDClear();
-	LCDWriteInt(stepper_position, 1);
-	LCDWriteInt(OBJ_Type, 1);
+	// 	LCDClear();
+	// 	LCDWriteInt(stepper_position, 1);
+	// 	LCDWriteInt(OBJ_Type, 1);
 	step_count = 0;
 
 	// --- LOGIC TO DETERMINE PATH (Same as before) ---
@@ -465,7 +497,7 @@ void sort(int OBJ_Type)
 			same_object_flag = 1;
 			break;
 		case (2):
-			direction = 1;
+			// direction = 1;
 			step_count = 100;
 			stepper_position = 1;
 			break;
@@ -486,7 +518,7 @@ void sort(int OBJ_Type)
 		switch (stepper_position)
 		{
 		case (1):
-			direction = 0;
+			// direction = 0;
 			step_count = 100;
 			stepper_position = 2;
 			break;
@@ -525,7 +557,7 @@ void sort(int OBJ_Type)
 			same_object_flag = 1;
 			break;
 		case (4):
-			direction = 1;
+			// direction = 1;
 			step_count = 100;
 			stepper_position = 3;
 			break;
@@ -546,7 +578,7 @@ void sort(int OBJ_Type)
 			stepper_position = 4;
 			break;
 		case (3):
-			direction = 0;
+			// direction = 0;
 			step_count = 100;
 			stepper_position = 4;
 			break;
@@ -583,8 +615,10 @@ ISR(INT0_vect)
 
 ISR(INT1_vect)
 {
+
 	EX_Flag = 1;
 	EX_Count++;
+	motor_stop();
 }
 
 ISR(INT2_vect)
