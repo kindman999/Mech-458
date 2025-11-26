@@ -183,40 +183,55 @@ int main(int argc, char *argv[])
 			stepper_steps_left--;
 			steps_moved_so_far++;
 		}
-		// PAUSE HANDLING (TEMPORARY STOP + RESTART by button pushing) ---
-		if (pause_request_flag)
-		{
-			pause_request_flag = 0;
+		// PAUSE HANDLING (TOGGLE PAUSE / RESUME WITH SAFE DEBOUNCE) ---
+if (pause_request_flag)
+{
+    // Consume the request from ISR
+    pause_request_flag = 0;
 
-			if (!pause_active)
-			{
-				pause_active = 1;
+    if (!pause_active)
+    {
+        pause_active = 1;
 
-				if(!system_paused){
-					system_paused = 1;
-				// Save current conveyor speed (duty cycle)
-				saved_duty_cycle = OCR0A;
+        // Disable INT4 while we are handling pause/resume to avoid extra toggles
+        EIMSK &= ~_BV(INT4);
 
-				if (saved_duty_cycle == 0)
-				{
-					//safety fall back
-					saved_duty_cycle = 50;
-				}
-				//ramp down to 0
-				motor_scurve_decel(saved_duty_cycle, 0, 1000, 50);
-				OCR0A = 0;
-			
-				//show paused message
-				}
-				else{
-					system_paused = 0;
+        if (!system_paused)
+        {
+            // RUNNING → go into PAUSE
+            system_paused = 1;
 
-					motor_scurve_accel(0, saved_duty_cycle, 400, 40);
-					OCR0A = saved_duty_cycle;
-				}
-				pause_active = 0;
-			}
-		}
+            // Save current conveyor speed (duty cycle)
+            saved_duty_cycle = OCR0A;
+            if (saved_duty_cycle == 0)
+            {
+                // Safety fallback in case we somehow paused at 0
+                saved_duty_cycle = 50;
+            }
+
+            // Ramp down to 0
+            motor_scurve_decel(saved_duty_cycle, 0, 1000, 50);
+            OCR0A = 0;
+
+            // show paused message
+            
+        }
+        else
+        {
+            // PAUSED → RESUME
+            system_paused = 0;
+
+            // Ramp back up to previous speed
+            motor_scurve_accel(0, saved_duty_cycle, 400, 40);
+            OCR0A = saved_duty_cycle;
+        }
+
+        // Re-enable INT4 now that S-curve is complete
+        EIMSK |= _BV(INT4);
+
+        pause_active = 0;
+    }
+}
 
 		// POLLING LOGIC
 		if (STATE == 0)
