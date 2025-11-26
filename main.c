@@ -13,11 +13,7 @@
 const uint8_t stepper_delay_table[STEPPER_RAMP_STEPS + 1] =
 	{
 		18, // 0 - very slow
-<<<<<<< HEAD
 		17, // 1
-=======
-		17,	// 1
->>>>>>> e148df3ef5778b25d49e3cbc7dcea403ea004278
 		16, // 2
 		15, // 3
 		14, // 4
@@ -66,6 +62,7 @@ volatile uint16_t ADC_result_flag = 0;
 volatile uint16_t MIN_reflective_value = 1023;
 volatile uint8_t sample_ready = 0;
 volatile uint8_t Reflective_Counter = 0;
+volatile uint8_t RETURN_TO_SCAN = 0;
 
 volatile uint8_t OBJ_Type = 0;
 volatile uint8_t OBJ_Types[100]; // store object types
@@ -187,7 +184,6 @@ int main(int argc, char *argv[])
 			stepper_steps_left--;
 			steps_moved_so_far++;
 		}
-<<<<<<< HEAD
 		// PAUSE HANDLING (TOGGLE PAUSE / RESUME)
 		if (pause_request_flag && !pause_active)
 		{
@@ -238,59 +234,6 @@ int main(int argc, char *argv[])
 
 			pause_active = 0;
 		}
-=======
-// PAUSE HANDLING (TOGGLE PAUSE / RESUME)
-if (pause_request_flag && !pause_active)
-{
-    // Consume the request from ISR
-    pause_request_flag = 0;
-    pause_active = 1;
-
-    // Disable INT4 while we are handling pause/resume to avoid extra toggles
-    EIMSK &= ~_BV(INT4);
-
-    if (!system_paused)
-    {
-        // RUNNING → go into PAUSE
-        system_paused = 1;
-
-        // Save current conveyor speed (duty cycle)
-        saved_duty_cycle = OCR0A;
-        if (saved_duty_cycle == 0)
-        {
-            // Safety fallback in case we somehow paused at 0
-            saved_duty_cycle = 50;   // your normal run speed
-        }
-
-        // Smooth ramp down to a stop
-        motor_scurve_decel(saved_duty_cycle, 0, 1000, 50);
-        OCR0A = 0;   // ensure conveyor is fully stopped
-
-        // STOP ALL MOTION: kill any in-progress stepper move
-        stepper_steps_left = 0;
-        steps_moved_so_far = 0;
-
-        // Return the state machine to the idle/polling state
-        STATE = 0;
-    }
-    else
-    {
-        // PAUSED → RESUME
-        system_paused = 0;
-
-        // Ramp back up to previous speed
-        motor_scurve_accel(0, saved_duty_cycle, 400, 40);
-        OCR0A = saved_duty_cycle;
-    }
-
-    // Clear any pending INT4 flag and re-enable the pause interrupt
-    EIFR |= _BV(INTF4);   // clear INT4 flag
-    EIMSK |= _BV(INT4);   // re-enable INT4
-
-    pause_active = 0;
-}
-
->>>>>>> e148df3ef5778b25d49e3cbc7dcea403ea004278
 
 		// POLLING LOGIC
 		if (STATE == 0)
@@ -347,7 +290,37 @@ if (pause_request_flag && !pause_active)
 			break;
 
 		case 2: // REFLECTIVE STAGE
-			// if adc is not finished, go bacl to main loop
+
+			// --- FIX PART A: EMERGENCY DETOUR ---
+			// If Exit Sensor triggers while we are stuck here, go sort immediately.
+			if (EX_Flag == 1)
+			{
+				RETURN_TO_SCAN = 1; // Remember to come back
+
+				// Manually trigger the sort
+				sort(head->e.OBJ_Type);
+				sorted_flag = 1;
+				EX_Flag = 0;
+				EX_Count--;
+
+				STATE = 3; // Jump to Bucket Stage
+				break;
+			}
+
+			// --- FIX PART B: BELT RESCUE ---
+			// If stepper is done moving but belt is still stopped, restart it.
+			// This un-sticks the object under the reflective sensor.
+			if (stepper_steps_left == 0)
+			{
+				if (OCR0A == 0)
+				{
+					OCR0A = 80;
+					motor_apply_direction();
+				}
+			}
+			// ------------------------------------
+
+			// if adc is not finished, go back to main loop
 			if (ADC_result_flag == 0)
 			{
 				break;
@@ -427,7 +400,16 @@ if (pause_request_flag && !pause_active)
 
 			sorted_flag = 0;
 			same_object_flag = 0;
-			STATE = 0;
+
+			if (RETURN_TO_SCAN == 1)
+			{
+				STATE = 2;			// Go back to finish scanning the object
+				RETURN_TO_SCAN = 0; // Reset flag
+			}
+			else
+			{
+				STATE = 0; // Normal idle
+			}
 			break;
 
 		case 4: // END
