@@ -192,28 +192,28 @@ int main(int argc, char *argv[])
 			{
 				pause_active = 1;
 
+				if(!system_paused){
+					system_paused = 1;
 				// Save current conveyor speed (duty cycle)
 				saved_duty_cycle = OCR0A;
 
-				// Ramp down to 0 using same S-curve function as startup/shutdown
-				if (saved_duty_cycle > 0)
+				if (saved_duty_cycle == 0)
 				{
-					motor_scurve_decel(saved_duty_cycle, 0, 1000, 50);
+					//safety fall back
+					saved_duty_cycle = 50;
 				}
-
-				// show LCD here?
-
-				// if currently paused press to resume
-				else
-				{
+				//ramp down to 0
+				motor_scurve_decel(saved_duty_cycle, 0, 1000, 50);
+				OCR0A = 0;
+			
+				//show paused message
+				}
+				else{
 					system_paused = 0;
 
-					//ramp back to previous speed
-					if (saved_duty_cycle > 0){
-						motor_scurve_accel(0, saved_duty_cycle, 400, 40);
-					}
+					motor_scurve_accel(0, saved_duty_cycle, 400, 40);
+					OCR0A = saved_duty_cycle;
 				}
-
 				pause_active = 0;
 			}
 		}
