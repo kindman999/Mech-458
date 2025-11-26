@@ -8,23 +8,27 @@
 #include "drivers.h" // Include the new drivers file
 
 // --- STEPPER S-CURVE TABLE (INT-ONLY) ---
-#define STEPPER_RAMP_STEPS 12
+#define STEPPER_RAMP_STEPS 16
 // Index 0 = slowest (start/stop), index 12 = fastest (middle / cruise)
 const uint8_t stepper_delay_table[STEPPER_RAMP_STEPS + 1] =
 	{
-		12, // 0  - very slow
-		11, // 1
-		10, // 2
-		9,	// 3
-		8,	// 4
-		7,	// 5
-		6,	// 6
-		6,	// 7
-		6,	// 8
-		6,	// 9
-		5,	// 10
-		5,	// 11
-		5	// 12 - fastest
+		18, // 0 - very slow
+		7,	// 1
+		16, // 2
+		15, // 3
+		14, // 4
+		13, // 5
+		11, // 6
+		10, // 7
+		9,	// 8
+		8,	// 9
+		7,	// 10
+		6,	// 11
+		6,	// 12
+		6,	// 13
+		6,	// 14
+		6,	// 15
+		6	// 16 - fastest
 };
 
 // --- GLOBAL VARIABLES ---
