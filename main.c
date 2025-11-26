@@ -13,7 +13,7 @@
 const uint8_t stepper_delay_table[STEPPER_RAMP_STEPS + 1] =
 	{
 		18, // 0 - very slow
-		7,	// 1
+		17,	// 1
 		16, // 2
 		15, // 3
 		14, // 4
