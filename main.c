@@ -347,6 +347,15 @@ int main(int argc, char *argv[])
 				}
 			}
 
+			if ((head != NULL) && (stepper_steps_left == 0)) // premtive sort
+			{
+				if (stepper_position != head->e.OBJ_Type)
+				{
+					sort(head->e.OBJ_Type);
+					sorted_flag = 1;
+				}
+			}
+
 			// State Transitions
 			if (STATE != 4)
 			{
@@ -758,6 +767,8 @@ ISR(INT1_vect)
 
 	EX_Flag = 1;
 	EX_Count++;
+
+	// not in right spot, stop motor
 	motor_stop();
 }
 
@@ -766,7 +777,7 @@ ISR(INT2_vect)
 	HE_Flag = 1;
 }
 
-// INT3 Rmp down
+// INT3 Ramp down
 ISR(INT3_vect)
 {
 	stop_request_flag = 1;
