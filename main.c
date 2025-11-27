@@ -92,6 +92,10 @@ volatile uint8_t pause_active = 0;		 // Prevent re-entrancy
 volatile uint8_t saved_duty_cycle = 0;	 // Store OCR0A before pausing
 volatile uint8_t system_paused = 0;
 
+// ramp down
+volatile int rampdown_flag = 0;
+volatile int Total_Sorted_Count = 0;
+
 // --- FUNCTION PROTOTYPES FOR LOCAL LOGIC ---
 void step(int);
 void step_zero(void);
@@ -328,7 +332,19 @@ int main(int argc, char *argv[])
 				// 				uint8_t current_duty = OCR0A;
 				// 				motor_scurve_decel(current_duty, 0, 1000, 50);
 				stop_request_flag = 0;
-				STATE = 4;
+				rampdown_flag = 1;
+				LCDClear();
+				LCDWriteString("RAMPING DOWN");
+			}
+
+			// rampdown condition
+			if (rampdown_flag == 1)
+			{
+				// cjheck if the same amount of objects sorted, have been placed in bucked
+				if ((OI_Counter == Total_Sorted_Count) && (stepper_steps_left == 0))
+				{
+					STATE = 4;
+				}
 			}
 
 			// State Transitions
@@ -477,7 +493,7 @@ int main(int argc, char *argv[])
 
 			dequeue(&head, &tail, &deQueuedLink);
 			free(deQueuedLink);
-
+			Total_Sorted_Count++;
 			sorted_flag = 0;
 			same_object_flag = 0;
 
@@ -493,6 +509,13 @@ int main(int argc, char *argv[])
 			break;
 
 		case 4: // END, RAMP DOWN
+
+			motor_stop();
+
+			Type_1 = 0;
+			Type_2 = 0;
+			Type_3 = 0;
+			Type_4 = 0;
 
 			for (int i = 0; i < OI_Counter; i++)
 			{
@@ -743,12 +766,12 @@ ISR(INT2_vect)
 	HE_Flag = 1;
 }
 
-// INT3 = STOP BUTTON (FULL RAMP-DOWN TO END STATE)
+// INT3 Rmp down
 ISR(INT3_vect)
 {
 	stop_request_flag = 1;
 }
-// INT4 = PAUSE BUTTON (TEMPORARY STOP & RESTART)
+// INT4 Pause Button
 ISR(INT4_vect)
 {
 	pause_request_flag = 1;
