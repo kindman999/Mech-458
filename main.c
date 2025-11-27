@@ -65,12 +65,14 @@ volatile uint8_t Reflective_Counter = 0;
 volatile uint8_t RETURN_TO_SCAN = 0;
 
 volatile uint8_t OBJ_Type = 0;
-volatile uint8_t OBJ_Types[100]; // store object types
+volatile uint8_t OBJ_Types[100];  // store object types
+volatile uint8_t OBJ_Types2[100]; // store object types, still on belt
 
 // Exit / HE / Stop globals
 volatile uint8_t EX_Flag = 0;
 volatile uint8_t EX_Count = 0;
 element Test;
+element Test2;
 element Sort_Element;
 volatile uint8_t HE_Flag = 0;
 volatile uint8_t END_Flag = 1;
@@ -78,6 +80,10 @@ volatile uint8_t Type_1 = 0;
 volatile uint8_t Type_2 = 0;
 volatile uint8_t Type_3 = 0;
 volatile uint8_t Type_4 = 0;
+volatile uint8_t Type_12 = 0;
+volatile uint8_t Type_22 = 0;
+volatile uint8_t Type_32 = 0;
+volatile uint8_t Type_42 = 0;
 volatile uint8_t stop_request_flag = 0;
 
 // PAUSE BUTTON GLOBALS ---
@@ -149,7 +155,7 @@ int main(int argc, char *argv[])
 	// --- MAIN WHILE LOOP (Replaces Goto) ---
 	while (1)
 	{
-		// stepper, always passive
+		// stepper
 		if (stepper_steps_left > 0)
 		{
 			uint8_t delay_ms;
@@ -165,7 +171,7 @@ int main(int argc, char *argv[])
 			{
 				idx = (uint8_t)stepper_steps_left;
 			}
-			// CRUISE (middle) PHASE
+			// CRUISE PHASE
 			else
 			{
 				idx = STEPPER_RAMP_STEPS;
@@ -217,15 +223,93 @@ int main(int argc, char *argv[])
 
 				// Return the state machine to the idle/polling state
 				STATE = 0;
+
+				// LCD Code
+				Type_1 = 0;
+				Type_2 = 0;
+				Type_3 = 0;
+				Type_4 = 0;
+				Type_12 = 0;
+				Type_22 = 0;
+				Type_32 = 0;
+				Type_42 = 0;
+
+				// counts how many objects of each type have been sorted into bucket
+				for (int i = 0; i < OI_Counter; i++)
+				{
+					int FINAL_OBJ = OBJ_Types[i]; // bucketed
+					switch (FINAL_OBJ)
+					{
+					case 1:
+						Type_1++;
+						break;
+					case 2:
+						Type_2++;
+						break;
+					case 3:
+						Type_3++;
+						break;
+					case 4:
+						Type_4++;
+						break;
+					}
+
+					int FINAL_OBJ2 = OBJ_Types2[i]; // reflective sensed
+					switch (FINAL_OBJ2)
+					{
+					case 1:
+						Type_12++;
+						break;
+					case 2:
+						Type_22++;
+						break;
+					case 3:
+						Type_32++;
+						break;
+					case 4:
+						Type_42++;
+						break;
+					}
+				}
+
+				int Aluminum_belt = Type_12 - Type_1;
+				int Steel_belt = Type_22 - Type_2;
+				int White_belt = Type_32 - Type_3;
+				int Black_belt = Type_42 - Type_4;
+
+				LCDClear();
+
+				// bucketd
+				LCDWriteString("Bin: ");
+				LCDWriteInt(Type_1, 2);
+				LCDWriteString(" ");
+				LCDWriteInt(Type_2, 2);
+				LCDWriteString(" ");
+				LCDWriteInt(Type_3, 2);
+				LCDWriteString(" ");
+				LCDWriteInt(Type_4, 2);
+
+				// still on belt
+				LCDGotoXY(0, 1);
+				LCDWriteString("Blt: ");
+				LCDWriteInt(Aluminum_belt, 2);
+				LCDWriteString(" ");
+				LCDWriteInt(Steel_belt, 2);
+				LCDWriteString(" ");
+				LCDWriteInt(White_belt, 2);
+				LCDWriteString(" ");
+				LCDWriteInt(Black_belt, 2);
+				LCDWriteString(" ");
 			}
 			else
 			{
 				// PAUSED → RESUME
 				system_paused = 0;
 
-				// Ramp back up to previous speed
+				// Ramp back up to previous speeda
 				motor_scurve_accel(0, saved_duty_cycle, 400, 40);
 				OCR0A = saved_duty_cycle;
+				LCDClear();
 			}
 
 			// Clear any pending INT4 flag and re-enable the pause interrupt
@@ -241,13 +325,11 @@ int main(int argc, char *argv[])
 			// Stop Request
 			if (stop_request_flag)
 			{
-				uint8_t current_duty = OCR0A;
-				motor_scurve_decel(current_duty, 0, 1000, 50);
+				// 				uint8_t current_duty = OCR0A;
+				// 				motor_scurve_decel(current_duty, 0, 1000, 50);
 				stop_request_flag = 0;
 				STATE = 4;
 			}
-
-			// Sorting Logic, only enters if object through reflective, previous object sorted, and the sort has zero steps left
 
 			// State Transitions
 			if (STATE != 4)
@@ -291,8 +373,6 @@ int main(int argc, char *argv[])
 
 		case 2: // REFLECTIVE STAGE
 
-			// --- FIX PART A: EMERGENCY DETOUR ---
-			// If Exit Sensor triggers while we are stuck here, go sort immediately.
 			if (EX_Flag == 1)
 			{
 				RETURN_TO_SCAN = 1; // Remember to come back
@@ -307,9 +387,7 @@ int main(int argc, char *argv[])
 				break;
 			}
 
-			// --- FIX PART B: BELT RESCUE ---
 			// If stepper is done moving but belt is still stopped, restart it.
-			// This un-sticks the object under the reflective sensor.
 			if (stepper_steps_left == 0)
 			{
 				if (OCR0A == 0)
@@ -352,6 +430,8 @@ int main(int argc, char *argv[])
 			newlink->e.OBJ_Type = OBJ_Type;
 			enqueue(&head, &tail, &newlink);
 
+			OBJ_Types2[OI_Counter - 1] = OBJ_Type;
+
 			stepper_flag = 1;
 			ADC_result_flag = 0;
 
@@ -361,7 +441,7 @@ int main(int argc, char *argv[])
 		case 3: // BUCKET STAGE
 
 			// see if stepper has reached certain point in sort, if not stop
-			if ((stepper_steps_left > 8) && same_object_flag == 0)
+			if ((stepper_steps_left > 20) && same_object_flag == 0)
 			{
 				OCR0A = 0;
 				break;
@@ -412,7 +492,8 @@ int main(int argc, char *argv[])
 			}
 			break;
 
-		case 4: // END
+		case 4: // END, RAMP DOWN
+
 			for (int i = 0; i < OI_Counter; i++)
 			{
 				int FINAL_OBJ = OBJ_Types[i];
@@ -628,10 +709,6 @@ void sort(int OBJ_Type)
 			break;
 		}
 	}
-
-	// --- NEW: ASSIGN THE JOB TO MAIN LOOP ---
-	// Instead of looping here, we just set these variables.
-	// The Main Loop will see 'stepper_steps_left > 0' and start moving.
 
 	if (step_count > 0)
 	{
