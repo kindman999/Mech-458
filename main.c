@@ -13,19 +13,19 @@
 const uint8_t stepper_delay_table[STEPPER_RAMP_STEPS + 1] =
 	{
 		18, // 0 - very slow
-		17, // 1
-		16, // 2
-		15, // 3
-		14, // 4
-		13, // 5
-		11, // 6
-		10, // 7
-		9,	// 8
-		8,	// 9
-		7,	// 10
-		6,	// 11
-		6,	// 12
-		6,	// 13
+		18, // 1
+		17, // 2
+		17, // 3
+		16, // 4
+		14, // 5
+		13, // 6
+		13, // 7
+		11, // 8
+		10, // 9
+		9,	// 10
+		8,	// 11
+		7,	// 12
+		7,	// 13
 		6,	// 14
 		6,	// 15
 		6	// 16 - fastest
@@ -204,9 +204,16 @@ int main(int argc, char *argv[])
 			// Disable INT4 while we are handling pause/resume to avoid extra toggles
 			EIMSK &= ~_BV(INT4);
 
+			mTimer(30);
+
+			// wait until button is released again, PE4 is pulled up
+			while (!(PINE & (1 << PE4)))
+			{
+				// button held down
+			}
 			if (!system_paused)
 			{
-				// RUNNING → go into PAUSE
+				// RUNNING ? go into PAUSE
 				system_paused = 1;
 
 				// Save current conveyor speed (duty cycle)
@@ -218,7 +225,8 @@ int main(int argc, char *argv[])
 				}
 
 				// Smooth ramp down to a stop
-				motor_scurve_decel(saved_duty_cycle, 0, 1000, 50);
+				/*motor_scurve_decel(saved_duty_cycle, 0, 1000, 50);*/
+				motor_stop();
 				OCR0A = 0; // ensure conveyor is fully stopped
 
 				// STOP ALL MOTION: kill any in-progress stepper move
@@ -307,11 +315,12 @@ int main(int argc, char *argv[])
 			}
 			else
 			{
-				// PAUSED → RESUME
+				// PAUSED ? RESUME
 				system_paused = 0;
 
 				// Ramp back up to previous speeda
-				motor_scurve_accel(0, saved_duty_cycle, 400, 40);
+				motor_apply_direction();
+				/*	motor_scurve_accel(0, saved_duty_cycle, 400, 40);*/
 				OCR0A = saved_duty_cycle;
 				LCDClear();
 			}
@@ -347,14 +356,13 @@ int main(int argc, char *argv[])
 				}
 			}
 
-			if ((head != NULL) && (stepper_steps_left == 0)) // premtive sort
-			{
-				if (stepper_position != head->e.OBJ_Type)
-				{
-					sort(head->e.OBJ_Type);
-					sorted_flag = 1;
-				}
-			}
+			// 			if ((head != NULL) && (stepper_steps_left == 0)) //premtive sort
+			// 		{
+			// 				if (stepper_position != head->e.OBJ_Type)
+			// 				{
+			//  					sort(head->e.OBJ_Type);
+			//  					sorted_flag = 1;
+			// 				}
 
 			// State Transitions
 			if (STATE != 4)
@@ -399,8 +407,7 @@ int main(int argc, char *argv[])
 		case 2: // REFLECTIVE STAGE
 
 			if (EX_Flag == 1)
-			{
-				RETURN_TO_SCAN = 1; // Remember to come back
+			{ // Remember to come back
 
 				// Manually trigger the sort
 				sort(head->e.OBJ_Type);
@@ -411,8 +418,7 @@ int main(int argc, char *argv[])
 				STATE = 3; // Jump to Bucket Stage
 				break;
 			}
-
-			// If stepper is done moving but belt is still stopped, restart it.
+			// restart belt
 			if (stepper_steps_left == 0)
 			{
 				if (OCR0A == 0)
@@ -437,17 +443,17 @@ int main(int argc, char *argv[])
 			{
 				OBJ_Type = 2; // Steel
 			}
-			else if (MIN_reflective_value >= 750 && MIN_reflective_value < 940)
+			else if (MIN_reflective_value >= 750 && MIN_reflective_value < 960)
 			{
 				OBJ_Type = 3; // White
 			}
-			else if (MIN_reflective_value >= 940 && MIN_reflective_value <= 1023)
+			else if (MIN_reflective_value >= 960 && MIN_reflective_value <= 1023)
 			{
 				OBJ_Type = 4; // Black
 			}
-			// 			LCDClear();
-			// 			LCDWriteInt(MIN_reflective_value,4);
-
+			// 						LCDClear();
+			// 					LCDWriteInt(MIN_reflective_value,4);
+			//
 			// Enqueue
 			initLink(&newlink);
 			newlink->e.Obj_num = OI_Counter;
@@ -465,8 +471,42 @@ int main(int argc, char *argv[])
 
 		case 3: // BUCKET STAGE
 
+			if (ADC_result_flag == 1)
+			{
+
+				if (MIN_reflective_value >= 0 && MIN_reflective_value < 250)
+				{
+					OBJ_Type = 1; // Aluminum
+				}
+				else if (MIN_reflective_value >= 250 && MIN_reflective_value < 750)
+				{
+					OBJ_Type = 2; // Steel
+				}
+				else if (MIN_reflective_value >= 750 && MIN_reflective_value < 960)
+				{
+					OBJ_Type = 3; // White
+				}
+				else if (MIN_reflective_value >= 960 && MIN_reflective_value <= 1023)
+				{
+					OBJ_Type = 4; // Black
+				}
+				// 					LCDClear();
+				// 					LCDWriteInt(MIN_reflective_value,4);
+
+				// Enqueue
+				initLink(&newlink);
+				newlink->e.Obj_num = OI_Counter;
+				newlink->e.Reflective = MIN_reflective_value;
+				newlink->e.OBJ_Type = OBJ_Type;
+				enqueue(&head, &tail, &newlink);
+
+				OBJ_Types2[OI_Counter - 1] = OBJ_Type;
+				ADC_result_flag = 0;
+				stepper_flag = 1;
+			}
+
 			// see if stepper has reached certain point in sort, if not stop
-			if ((stepper_steps_left > 20) && same_object_flag == 0)
+			if ((stepper_steps_left > 8) && same_object_flag == 0)
 			{
 				OCR0A = 0;
 				break;
@@ -506,15 +546,8 @@ int main(int argc, char *argv[])
 			sorted_flag = 0;
 			same_object_flag = 0;
 
-			if (RETURN_TO_SCAN == 1)
-			{
-				STATE = 2;			// Go back to finish scanning the object
-				RETURN_TO_SCAN = 0; // Reset flag
-			}
-			else
-			{
-				STATE = 0; // Normal idle
-			}
+			STATE = 0; // Normal idle
+
 			break;
 
 		case 4: // END, RAMP DOWN
@@ -547,21 +580,14 @@ int main(int argc, char *argv[])
 			}
 
 			LCDClear();
-			LCDWriteString("Aluminum: ");
+			LCDWriteString("Bin: ");
 			LCDWriteInt(Type_1, 2);
-			mTimer(2000);
-			LCDClear();
-			LCDWriteString("Steel: ");
+			LCDWriteString(" ");
 			LCDWriteInt(Type_2, 2);
-			mTimer(2000);
-			LCDClear();
-			LCDWriteString("White: ");
+			LCDWriteString(" ");
 			LCDWriteInt(Type_3, 2);
-			mTimer(2000);
-			LCDClear();
-			LCDWriteString("Black: ");
+			LCDWriteString(" ");
 			LCDWriteInt(Type_4, 2);
-			mTimer(2000);
 
 			while (1)
 				; // Stop here forever
@@ -635,7 +661,7 @@ void motor_stop(void)
 }
 void sort(int OBJ_Type)
 {
-	// 	LCDClear();
+	/*LCDClear();*/
 	// 	LCDWriteInt(stepper_position, 1);
 	// 	LCDWriteInt(OBJ_Type, 1);
 	step_count = 0;
@@ -767,8 +793,6 @@ ISR(INT1_vect)
 
 	EX_Flag = 1;
 	EX_Count++;
-
-	// not in right spot, stop motor
 	motor_stop();
 }
 
@@ -786,6 +810,7 @@ ISR(INT3_vect)
 ISR(INT4_vect)
 {
 	pause_request_flag = 1;
+	EIFR |= _BV(INTF4);
 }
 
 ISR(ADC_vect)
