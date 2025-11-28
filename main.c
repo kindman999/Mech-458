@@ -205,6 +205,15 @@ int main(int argc, char *argv[])
 			// Disable INT4 while we are handling pause/resume to avoid extra toggles
 			EIMSK &= ~_BV(INT4);
 
+			//small debounce and wait for release
+			mTimer(30);
+
+			//wait until button is released again, PE4 is pulled up
+			while(!(PINE & (1 << PE4))){
+				//button held down
+			}
+			//end debounde
+
 			if (!system_paused)
 			{
 				// RUNNING → go into PAUSE
@@ -219,8 +228,7 @@ int main(int argc, char *argv[])
 				}
 
 				// Smooth ramp down to a stop
-				//motor_scurve_decel(saved_duty_cycle, 0, 1000, 50);
-				motor_stop();
+				motor_scurve_decel(saved_duty_cycle, 0, 1000, 50);
 				OCR0A = 0; // ensure conveyor is fully stopped
 
 				// STOP ALL MOTION: kill any in-progress stepper move
@@ -787,12 +795,7 @@ ISR(INT3_vect)
 // INT4 Pause Button with debounce
 ISR(INT4_vect)
 {
-	uint16_t now = TCNT1; 
-	uint16_t delta = (uint16_t)(now-pause_time);
-	if(delta > 40000){ //40ms debounce
-		pause_request_flag = 1;
-		pause_time = now;
-	}
+	pause_request_flag = 1;
 	//clear pending flag
 	EIFR |= _BV(INTF4);
 }
