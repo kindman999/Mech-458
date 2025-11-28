@@ -8,11 +8,11 @@
 #include "drivers.h"
 
 // --- STEPPER S-CURVE TABLE ---
-#define STEPPER_RAMP_STEPS 16
+#define STEPPER_RAMP_STEPS 17
 const uint8_t stepper_delay_table[STEPPER_RAMP_STEPS + 1] =
 	{
-		18, 18, 17, 17, 16, 14, 13, 13,
-		11, 10, 9, 8, 7, 7, 6, 6, 6};
+		17, 17, 17, 17, 16, 16, 16, 16,
+		15, 14, 12, 11, 10, 8, 7, 6, 6, 6};
 
 // --- GLOBAL VARIABLES ---
 volatile char STATE = 0;			 // Kept unused
