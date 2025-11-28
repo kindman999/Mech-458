@@ -86,7 +86,7 @@ volatile uint8_t Type_32 = 0;
 volatile uint8_t Type_42 = 0;
 volatile uint8_t stop_request_flag = 0;
 
-// PAUSE BUTTON GLOBALS ---
+// PAUSE BUTTON GLOBALS 
 volatile uint8_t pause_request_flag = 0; // Set by pause button ISR
 volatile uint8_t pause_active = 0;		 // Prevent re-entrancy
 volatile uint8_t saved_duty_cycle = 0;	 // Store OCR0A before pausing
@@ -96,7 +96,7 @@ volatile uint8_t system_paused = 0;
 volatile int rampdown_flag = 0;
 volatile int Total_Sorted_Count = 0;
 
-// --- FUNCTION PROTOTYPES FOR LOCAL LOGIC ---
+// FUNCTION PROTOTYPES FOR LOCAL LOGIC 
 void step(int);
 void step_zero(void);
 void sort(int);
@@ -133,7 +133,7 @@ int main(int argc, char *argv[])
 	DDRD = 0b11110000;
 	DDRC = 0xFF;
 
-	// PAUSE BUTTON PIN SETUP (PE4 / INT4) ---
+	// PAUSE BUTTON PIN SETUP (PE4 / INT4)
 	DDRE &= ~(1 << PE4); // PE4 as input
 	PORTE |= (1 << PE4); // Enable pull-up on pause button
 
@@ -204,6 +204,7 @@ int main(int argc, char *argv[])
 			// Disable INT4 while we are handling pause/resume to avoid extra toggles
 			EIMSK &= ~_BV(INT4);
 
+<<<<<<< HEAD
 			mTimer(30);
 
 			// wait until button is released again, PE4 is pulled up
@@ -211,6 +212,17 @@ int main(int argc, char *argv[])
 			{
 				// button held down
 			}
+=======
+			//small debounce and wait for release
+			mTimer(30);
+
+			//wait until button is released again, PE4 is pulled up
+			while(!(PINE & (1 << PE4))){
+				//button held down
+			}
+			//end debounde
+
+>>>>>>> ac8d9fa8fa23cc419f2d6022eed4f969249e64a4
 			if (!system_paused)
 			{
 				// RUNNING ? go into PAUSE
@@ -666,7 +678,7 @@ void sort(int OBJ_Type)
 	// 	LCDWriteInt(OBJ_Type, 1);
 	step_count = 0;
 
-	// --- LOGIC TO DETERMINE PATH (Same as before) ---
+	// logic to determine path
 	if (OBJ_Type == 1)
 	{ // Aluminum
 		switch (stepper_position)
@@ -806,10 +818,14 @@ ISR(INT3_vect)
 {
 	stop_request_flag = 1;
 }
-// INT4 Pause Button
+// INT4 Pause Button with debounce
 ISR(INT4_vect)
 {
 	pause_request_flag = 1;
+<<<<<<< HEAD
+=======
+	//clear pending flag
+>>>>>>> ac8d9fa8fa23cc419f2d6022eed4f969249e64a4
 	EIFR |= _BV(INTF4);
 }
 
