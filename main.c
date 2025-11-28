@@ -91,7 +91,7 @@ volatile uint8_t pause_request_flag = 0; // Set by pause button ISR
 volatile uint8_t pause_active = 0;		 // Prevent re-entrancy
 volatile uint8_t saved_duty_cycle = 0;	 // Store OCR0A before pausing
 volatile uint8_t system_paused = 0;
-volatile uint32_t pause_time = 0;
+volatile uint16_t pause_time = 0;
 
 // ramp down
 volatile int rampdown_flag = 0;
@@ -787,9 +787,10 @@ ISR(INT3_vect)
 // INT4 Pause Button with debounce
 ISR(INT4_vect)
 {
-	uint32_t now = TCNT1; 
-	if(now - pause_time > 40000){ //40ms debounce
-	pause_request_flag = 1;
+	uint16_t now = TCNT1; 
+	uint16_t delta = (uint16_t)(now-pause_time);
+	if(delta > 40000){ //40ms debounce
+		pause_request_flag = 1;
 		pause_time = now;
 	}
 	//clear pending flag
