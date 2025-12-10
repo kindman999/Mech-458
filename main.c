@@ -7,14 +7,14 @@
 #include "LinkedQueue.h"
 #include "drivers.h"
 
-// --- STEPPER S-CURVE TABLE ---
+// Stepper S-Curve Table
 #define STEPPER_RAMP_STEPS 17
 const uint8_t stepper_delay_table[STEPPER_RAMP_STEPS + 1] =
 	{
-		17, 17, 17, 17, 16, 16, 16, 16,
-		15, 14, 12, 11, 10, 8, 7, 6, 6, 6};
+		17, 17, 17, 16, 16, 14,
+		14, 12, 11, 10, 8, 7, 7, 7, 6, 6, 6, 6};
 
-// --- GLOBAL VARIABLES ---
+// Global Variables
 volatile char STATE = 0;			 // Kept unused
 volatile uint8_t sorting_active = 0; // Non-blocking flag
 
@@ -37,16 +37,16 @@ volatile uint8_t OI_Counter = 0;
 volatile uint8_t Entry_Flag = 0;
 volatile uint8_t OR_Flag = 0;
 
-// ADC / Reflective globals
+// ADC and Reflective globals
 volatile uint16_t reflective_value = 0;
 volatile uint16_t ADC_result_flag = 0;
-volatile uint16_t MIN_reflective_value = 1023; // Original name
+volatile uint16_t MIN_reflective_value = 1023;
 volatile uint8_t OBJ_Type = 0;
 volatile uint8_t OBJ_Types[100];
 volatile uint8_t OBJ_Types2[100];
 volatile uint8_t RETURN_TO_SCAN = 0;
 
-// Exit / HE / Stop globals
+// Exit, Hall Effect, and Stop globals
 volatile uint8_t EX_Flag = 0;
 volatile uint8_t EX_Count = 0;
 element Test;
@@ -61,31 +61,37 @@ volatile uint8_t Type_32 = 0;
 volatile uint8_t Type_42 = 0;
 volatile uint8_t stop_request_flag = 0;
 
-// PAUSE GLOBALS
+// Pause globals
 volatile uint8_t pause_request_flag = 0;
 volatile uint8_t pause_active = 0;
 volatile uint8_t saved_duty_cycle = 0;
 volatile uint8_t system_paused = 0;
 volatile int rampdown_flag = 0;
 volatile int Total_Sorted_Count = 0;
+volatile int Belt_count = 0;
 
-// --- FUNCTION PROTOTYPES ---
+volatile unsigned int timer_count = 0;
+
+// Function Prototypes
 void step(int);
 void step_zero(void);
 void sort(int);
 void motor_stop(void);
+void timerStart(void);
 
 int main(int argc, char *argv[])
 {
 	CLKPR = 0x80;
 	CLKPR = 0x01; // 8MHz
 	TCCR1B |= _BV(CS11);
+	setupTimer();
 
 	// FIFO Setup
 	link *head, *tail;
 	setup(&head, &tail);
 	link *newlink;
 	link *deQueuedLink;
+	link *temp_link;
 
 	cli();
 
@@ -96,7 +102,7 @@ int main(int argc, char *argv[])
 	InitLCD(LS_BLINK | LS_ULINE);
 	LCDClear();
 
-	// Pins
+	// Pin initialization
 	DDRA = 0xFF;
 	PORTA = 0x00;
 	DDRD = 0b11110000;
@@ -118,18 +124,19 @@ int main(int argc, char *argv[])
 	sei();
 
 	// Startup
-	motor_scurve_accel(0, 80, 400, 40);
+	motor_scurve_accel(0, 60, 400, 40);
 	step_zero();
 
-	// --- MAIN LOOP ---
+	// Main Loop
 	while (1)
 	{
-		// 1. STEPPER DRIVER
+		// 1. Stepper Driver
 		if (stepper_steps_left > 0)
 		{
 			uint8_t delay_ms;
 			uint8_t idx;
 
+			// Checking if Accel, Decel, or cruising
 			if (steps_moved_so_far < STEPPER_RAMP_STEPS)
 				idx = (uint8_t)steps_moved_so_far;
 			else if (stepper_steps_left <= STEPPER_RAMP_STEPS)
@@ -147,7 +154,7 @@ int main(int argc, char *argv[])
 			steps_moved_so_far++;
 		}
 
-		// 2. PAUSE HANDLING
+		// 2. Pause Handling
 		if (pause_request_flag && !pause_active)
 		{
 			pause_request_flag = 0;
@@ -170,14 +177,18 @@ int main(int argc, char *argv[])
 				STATE = 0;
 
 				// Stats Display
+				temp_link = head;
+				while (temp_link != NULL)
+				{
+					temp_link = temp_link->next;
+					Belt_count++;
+				}
+
 				Type_1 = 0;
 				Type_2 = 0;
 				Type_3 = 0;
 				Type_4 = 0;
-				Type_12 = 0;
-				Type_22 = 0;
-				Type_32 = 0;
-				Type_42 = 0;
+				/*Type_12 = 0; Type_22 = 0; Type_32 = 0; Type_42 = 0;*/
 				for (int i = 0; i < OI_Counter; i++)
 				{
 					switch (OBJ_Types[i])
@@ -195,21 +206,7 @@ int main(int argc, char *argv[])
 						Type_4++;
 						break;
 					}
-					switch (OBJ_Types2[i])
-					{
-					case 1:
-						Type_12++;
-						break;
-					case 2:
-						Type_22++;
-						break;
-					case 3:
-						Type_32++;
-						break;
-					case 4:
-						Type_42++;
-						break;
-					}
+					/*switch (OBJ_Types2[i]) { case 1: Type_12++; break; case 2: Type_22++; break; case 3: Type_32++; break; case 4: Type_42++; break; }*/
 				}
 				LCDClear();
 				LCDWriteString("Bin: ");
@@ -221,17 +218,13 @@ int main(int argc, char *argv[])
 				LCDWriteString(" ");
 				LCDWriteInt(Type_4, 2);
 				LCDGotoXY(0, 1);
-				LCDWriteString("Blt: ");
-				LCDWriteInt(Type_12 - Type_1, 2);
-				LCDWriteString(" ");
-				LCDWriteInt(Type_22 - Type_2, 2);
-				LCDWriteString(" ");
-				LCDWriteInt(Type_32 - Type_3, 2);
-				LCDWriteString(" ");
-				LCDWriteInt(Type_42 - Type_4, 2);
+				LCDWriteString("Belt Count: ");
+				LCDWriteInt(Belt_count, 2);
+				// LCDWriteString("Blt: "); LCDWriteInt(Type_12 - Type_1, 2); LCDWriteString(" "); LCDWriteInt(Type_22 - Type_2, 2); LCDWriteString(" "); LCDWriteInt(Type_32 - Type_3, 2); LCDWriteString(" "); LCDWriteInt(Type_42 - Type_4, 2);
 			}
 			else
 			{
+				Belt_count = 0;
 				system_paused = 0;
 				motor_apply_direction();
 				OCR0A = saved_duty_cycle;
@@ -242,20 +235,22 @@ int main(int argc, char *argv[])
 			pause_active = 0;
 		}
 
-		// 3. STOP REQUEST
-		if (stop_request_flag)
+		// 3. Stop Request
+		if (stop_request_flag == 1)
 		{
 			stop_request_flag = 0;
+			timerStart();
 			rampdown_flag = 1;
 			LCDClear();
 			LCDWriteString("RAMPING DOWN");
 		}
-
+		// Rampdown logic
 		if (rampdown_flag == 1)
 		{
-			if ((OI_Counter == Total_Sorted_Count) && (stepper_steps_left == 0))
+			if (timer_count > 5000)
 			{
 				motor_stop();
+
 				Type_1 = 0;
 				Type_2 = 0;
 				Type_3 = 0;
@@ -293,21 +288,23 @@ int main(int argc, char *argv[])
 			}
 		}
 
-		// -------------------------------------------------------------
-		// 4. MAIN LOGIC
-		// -------------------------------------------------------------
+		// 4. Main Logic
 
-		// A. ADC / SCANNING
+		// A. ADC and Scanning
 		if (ADC_result_flag == 1)
 		{
 			if (MIN_reflective_value < 250)
 				OBJ_Type = 1;
-			else if (MIN_reflective_value < 750)
+			else if (MIN_reflective_value < 800)
 				OBJ_Type = 2;
 			else if (MIN_reflective_value < 960)
 				OBJ_Type = 3;
 			else
 				OBJ_Type = 4;
+
+			// for testing
+			//  LCDClear();
+			//  LCDWriteInt(MIN_reflective_value,4);
 
 			initLink(&newlink);
 			newlink->e.Obj_num = OI_Counter;
@@ -320,9 +317,10 @@ int main(int argc, char *argv[])
 			ADC_result_flag = 0;
 		}
 
-		// B. SORT TRIGGER
+		// B. Sort Trigger
 		if ((EX_Flag == 1) && (sorting_active == 0))
 		{
+			// 1. Check if we actually have an object to sort
 			if (head != NULL)
 			{
 				sort(head->e.OBJ_Type);
@@ -332,48 +330,51 @@ int main(int argc, char *argv[])
 			}
 			else
 			{
+				// 2. Empty Queue or Bounce Protection
+
 				EX_Flag = 0;
 				EX_Count--;
+
+				if (!system_paused)
+				{
+					OCR0A = 60;
+					motor_apply_direction();
+				}
 			}
 		}
 
-		// C. SORT MANAGEMENT
+		// C. Sort Management
 		if (sorting_active == 1)
 		{
-			if ((stepper_steps_left > 8) && (same_object_flag == 0))
+			if ((stepper_steps_left > 6) && (same_object_flag == 0))
 			{
-				OCR0A = 0; // Stop Belt
+				OCR0A = 0;
 			}
 			else
 			{
-				if (OCR0A == 0 && !system_paused)
-				{
-					OCR0A = 80;
-					motor_apply_direction();
-				}
+				OCR0A = 60;
+				motor_apply_direction();
+			}
 
-				if (stepper_steps_left == 0)
-				{
-					if (head != NULL)
-					{
-						Test = firstValue(&head);
-						OBJ_Types[Test.Obj_num - 1] = Test.OBJ_Type;
-						dequeue(&head, &tail, &deQueuedLink);
-						free(deQueuedLink);
-						Total_Sorted_Count++;
-					}
-					sorted_flag = 0;
-					same_object_flag = 0;
-					sorting_active = 0;
-				}
+			if (stepper_steps_left == 0)
+			{
+				Test = firstValue(&head);
+				OBJ_Types[Test.Obj_num - 1] = Test.OBJ_Type;
+				dequeue(&head, &tail, &deQueuedLink);
+				free(deQueuedLink);
+				Total_Sorted_Count++;
+
+				sorted_flag = 0;
+				same_object_flag = 0;
+				sorting_active = 0;
 			}
 		}
 
-	} // End While(1)
+	} // End While loop
 	return 0;
 }
 
-// --- LOCAL FUNCTIONS ---
+// Local Functions
 
 void step(int direction)
 {
@@ -407,6 +408,7 @@ void step(int direction)
 	}
 }
 
+// stepper zero
 void step_zero(void)
 {
 	HE_Flag = 0;
@@ -426,6 +428,7 @@ void step_zero(void)
 
 void motor_stop(void) { PORTL = 0b11110000; }
 
+// Stepper sort
 void sort(int OBJ_Type)
 {
 	step_count = 0;
@@ -535,8 +538,16 @@ void sort(int OBJ_Type)
 	}
 }
 
-// --- ISRs ---
+// Background timer start (for rampdown)
+void timerStart()
+{
+	timer_count = 0;
+	TCNT3 = 0;
+}
 
+// ISRs
+
+// Optical Sensor
 ISR(INT0_vect)
 {
 	Entry_Flag = 1;
@@ -546,23 +557,29 @@ ISR(INT0_vect)
 	ADCSRA |= _BV(ADSC);
 }
 
+// EX Sensor
 ISR(INT1_vect)
 {
 	EX_Flag = 1;
 	EX_Count++;
 	motor_stop();
+	OCR0A = 0;
 }
 
+// HE Sensor
 ISR(INT2_vect) { HE_Flag = 1; }
 
+// Ramdown Button ISR
 ISR(INT3_vect) { stop_request_flag = 1; }
 
+// Pause Button ISR
 ISR(INT4_vect)
 {
 	pause_request_flag = 1;
 	EIFR |= _BV(INTF4);
 }
 
+// ADC conversions
 ISR(ADC_vect)
 {
 	reflective_value = ADC;
@@ -579,17 +596,16 @@ ISR(ADC_vect)
 	else
 	{
 		// Object appears gone.
-		// ONLY finalize if belt is moving. (Fixes motor stop glitch)
-		if (OCR0A > 0)
-		{
-			ADC_result_flag = 1;
-		}
-		else
-		{
-			// Belt stopped? Likely noise. Keep checking until belt restarts.
-			ADCSRA |= _BV(ADSC);
-		}
+		// Only finalize if belt is moving. (Fixes motor stop glitch)
+		ADC_result_flag = 1;
 	}
 }
 
+// BAD ISR
 ISR(BADISR_vect) {}
+
+// Background timer ISR, for Rampdown
+ISR(TIMER3_COMPA_vect)
+{
+	timer_count++;
+}

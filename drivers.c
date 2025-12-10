@@ -1,9 +1,8 @@
 #include "drivers.h"
 
-// Needs access to the global defined in main.c
-uint8_t motor_direction_cw = 0;
+uint8_t motor_direction_cw = 1;
 
-// mTimer
+// mTimer, used for stepper delay
 void mTimer(int count)
 {
 	int i = 0;
@@ -21,6 +20,20 @@ void mTimer(int count)
 		}
 	}
 	return;
+}
+
+// Background timer (rampdowwn)
+void setupTimer()
+{
+
+	cli();
+
+	TCCR3B |= _BV(WGM12); // clear on compare match
+	OCR3A = 124;
+	TCCR3B |= _BV(CS31) | _BV(CS30); // 64 prescaler
+	TIMSK3 |= _BV(OCIE3A);
+
+	sei();
 }
 
 // PWM
@@ -55,6 +68,7 @@ void adc_init(void)
 	ADCSRA |= _BV(ADPS2) | _BV(ADPS0);
 }
 
+// Initialize DC Motor pins
 void motor_init(void)
 {
 	// Direction pins
@@ -68,6 +82,7 @@ void motor_init(void)
 	motor_apply_direction();
 }
 
+// Apply DC Motor Direction
 void motor_apply_direction(void)
 {
 	if (motor_direction_cw)
@@ -82,6 +97,7 @@ void motor_apply_direction(void)
 	}
 }
 
+// Change DC Duty Cycle
 void motor_set_speed(uint8_t duty)
 {
 	OCR0A = duty;
@@ -98,7 +114,8 @@ void motor_scurve_accel(uint8_t start_duty, uint8_t target_duty, uint16_t durati
 
 	int16_t delta = (int16_t)target_duty - (int16_t)start_duty;
 	uint16_t dt = duration_ms / steps;
-	if (dt == 0) dt = 1;
+	if (dt == 0)
+		dt = 1;
 
 	motor_set_speed(start_duty);
 
@@ -109,8 +126,10 @@ void motor_scurve_accel(uint8_t start_duty, uint8_t target_duty, uint16_t durati
 		float s = t * t * (3.0f - 2.0f * t);
 		float duty_f = (float)start_duty + (float)delta * s;
 
-		if (duty_f < 0.0f) duty_f = 0.0f;
-		else if (duty_f > 255.0f) duty_f = 255.0f;
+		if (duty_f < 0.0f)
+			duty_f = 0.0f;
+		else if (duty_f > 255.0f)
+			duty_f = 255.0f;
 
 		motor_set_speed((uint8_t)(duty_f + 0.5f));
 		mTimer(dt);
